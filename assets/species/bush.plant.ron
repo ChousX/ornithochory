@@ -1,0 +1,72 @@
+// A broadleaf shrub (hazel, viburnum, box): no trunk, but many stems
+// from the base (basitonic branching) fanning out to a rounded mound, each
+// ending in a spray of twigs at its surface, where the light is and so
+// the leaves are; the envelope trims anything that grows past it, like a
+// hedge.
+//
+// In the rules: `n` counts the nodes left on an axis, `s` scales its steps.
+(
+    name: "bush",
+    variants: 6,
+    form: Structure((
+        growth: LSystem((
+            defines: {
+                "stems": 18,
+            },
+            axiom: "B(stems)",
+            rules: [
+                // Stems fan out from the crown at the ground, from upright
+                // to nearly flat, each long enough to reach the mound's
+                // surface in its direction.
+                (symbol: 'B', params: ["k"], when: "k > 0",
+                 to: "X(72 * sqrt(rand(0.02, 1)), rand(0.85, 1.1)) /(137.5 + rand(-20, 20)) B(k - 1)"),
+                (symbol: 'X', params: ["a", "s"],
+                 to: "[ &(a) #(0.012) S(3, s * (8.5 - 5 * a / 90) / 3) ]"),
+                // A stem: now and then a short side twig, so the inside is
+                // twiggy and leafy too; then a spray of twigs at the surface.
+                (symbol: 'S', params: ["n", "l"], when: "n > 0", weight: 0.5,
+                 to: "F(l) [ #(0) /(rand(0, 360)) &(rand(40, 60)) T(1, 0.7) ] /(137.5) S(n - 1, l * 0.9)"),
+                (symbol: 'S', params: ["n", "l"], when: "n > 0", weight: 0.5,
+                 to: "F(l) /(137.5) S(n - 1, l * 0.9)"),
+                (symbol: 'S', params: ["n", "l"], when: "n <= 0", to: "#(0) T(3, 1)"),
+                // Twigs fork sympodially, or now and then just extend.
+                (symbol: 'T', params: ["n", "s"], when: "n > 0", weight: 0.7,
+                 to: "F(s) [ +(rand(30, 50)) T(n - 1, s * 0.8) ] /(137.5) T(n - 1, s * 0.9)"),
+                (symbol: 'T', params: ["n", "s"], when: "n > 0", weight: 0.3,
+                 to: "F(s) /(137.5) T(n - 1, s * 0.95)"),
+                (symbol: 'T', params: ["n", "s"], when: "n <= 0", to: "F(s * 0.6)"),
+            ],
+            generations: 40,
+            max_modules: 20000,
+            step: 0.1,
+            step_scale: 1.0,
+            angle: 30.0,
+            angle_jitter: 8.0,
+            tropism: (0.0, 1.0, 0.0),
+            tropism_strength: 0.03,
+            envelope: Some(Ellipsoid(center: (0.0, 0.55, 0.0), radii: (0.9, 0.75, 0.9))),
+        )),
+        bark: (color: (0.30, 0.24, 0.18), roughness: 0.9, sides: 4),
+        leaves: Some((
+            color: (0.20, 0.38, 0.12),
+            color_jitter: 0.15,
+            length: 0.14,
+            width: 0.085,
+            tip_depth: 3,
+            per_node: 3,
+            droop: 0.8,
+            segments: 2,
+            lod_keep: Some((0.5, 0.3)),
+        )),
+        tip_radius: 0.003,
+        pipe_exponent: 2.3,
+    )),
+    placement: (
+        spacing: 3.0,
+        probability: 0.3,
+        slope: (0.0, 30.0),
+        noise: Some((frequency: 0.04, threshold: 0.0, octaves: 2)),
+        scale: (0.8, 1.2),
+        sink: 0.05,
+    ),
+)

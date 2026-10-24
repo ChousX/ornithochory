@@ -1,0 +1,86 @@
+[package]
+name = "ornithochory"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Generic procedural plants for Bevy: trees, shrubs, herbs, grass and moss from one skeleton pipeline"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ChousX/ornithochory"
+keywords = ["bevy", "procedural", "vegetation", "trees", "gamedev"]
+categories = ["game-development", "rendering"]
+exclude = ["/docs", "/devenv.nix", "/devenv.yaml", "/devenv.lock", "/.envrc", "/clippy.toml", "/.gitignore"]
+
+[features]
+# Scatter species over tarasaur terrain chunks as they stream in, and
+# re-scatter a chunk when it is edited: `integrate::tarasaur`.
+tarasaur = ["dep:tarasaur"]
+# Ornisculpt mobs bend the plants they walk through, and ornisculpt's
+# `TierCamera` also picks plant tiers: `integrate::ornisculpt`.
+ornisculpt = ["dep:ornisculpt"]
+
+[dependencies]
+# Only the parts the library uses; the app's own `bevy` dependency picks the
+# platform features. The same set as tarasaur, so the two unify.
+bevy = { version = "0.20", default-features = false, features = [
+    "std",
+    "multi_threaded",
+    "async_executor",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_window",
+    "bevy_pbr",
+    "bevy_render",
+    "bevy_core_pipeline",
+    # Vec3 and friends in `*.plant.ron`.
+    "serialize",
+] }
+fastnoise-lite = "1.1"
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# The same sources as Domain Expance, so an app using all three gets one copy
+# of each.
+tarasaur = { git = "https://github.com/ChousX/tarasaur", branch = "main", optional = true }
+ornisculpt = { git = "https://github.com/ChousX/ornisculpt", branch = "main", optional = true }
+
+[dev-dependencies]
+# Examples open windows and take input, so they need Bevy's default features.
+bevy = "0.20"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[[example]]
+name = "terrain"
+required-features = ["tarasaur"]
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# Bevy system params (Res, Query, Extract, On, ...) must be taken by value.
+needless_pass_by_value = "allow"
+# Bevy systems take many params and queries name many components.
+too_many_arguments = "allow"
+type_complexity = "allow"
+# DENY PANICS:
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
+
+[package.metadata.docs.rs]
+all-features = true
