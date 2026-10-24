@@ -128,6 +128,9 @@ app.add_plugins((TarasaurPlugin::default(), OrnithochoryPlugin, TerrainPlantsPlu
 Chunks are scattered as their fields load, re-scattered when edited (after
 the SDF settles) or when their LOD changes, and their plants unload with
 them. `placement.materials` lists the voxel material ids a species grows on.
+Plants grow only on terrain that is shown (`Flora::clipped`, on by
+default): ground hidden by a `VisibilityField` stays bare, and a chunk
+re-scatters when what it shows changes.
 
 ### With ornisculpt (`--features ornisculpt`)
 

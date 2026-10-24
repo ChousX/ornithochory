@@ -5,7 +5,9 @@
 //! (once the SDF's jump flood has settled) or changes LOD. Plants are
 //! children of their chunk, so they unload with it. Placement is a pure
 //! function of the world seed and position, so nothing is saved: a chunk
-//! that streams back in grows the same plants.
+//! that streams back in grows the same plants. By default plants grow only
+//! on terrain that is shown (`Flora::clipped`), so revealing ground grows
+//! its plants and hiding it clears them.
 //!
 //! Stemmed species spawn one [`Plant`] each; cover species one
 //! [`CoverPatch`] per chunk, at a tier matched to the chunk's LOD.
@@ -19,7 +21,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use tarasaur::chunk::{CHUNK_SIZE, Chunk, ChunkManager, ChunkPosition, ChunkSet, world_pos_to_chunk_pos};
-use tarasaur::field::{DirtyField, Field, LOD, MaterialField, SDF, VoxelField, VoxelMaterial};
+use tarasaur::field::{DirtyField, Field, LOD, MaterialField, SDF, VisibilityField, VoxelField, VoxelMaterial};
 use tarasaur::raycast::collider::cast;
 use tarasaur::raycast::terrain_ray::TerrainRay;
 
@@ -40,11 +42,16 @@ pub struct Flora {
     /// Seconds after an edit before its chunk re-scatters, so a brush
     /// stroke re-scatters once, not every frame.
     pub settle_secs: f32,
+    /// Grow only on terrain as drawn: the `SDF` clipped by its
+    /// `VisibilityField`, so hidden ground stays bare and a chunk
+    /// re-scatters when what is shown changes. `false` grows on the ground
+    /// under hidden regions too. Without a `VisibilityField` the two agree.
+    pub clipped: bool,
 }
 
 impl Default for Flora {
     fn default() -> Self {
-        Self { world_seed: 0, entries: Vec::new(), casts_per_frame: 4000, settle_secs: 0.3 }
+        Self { world_seed: 0, entries: Vec::new(), casts_per_frame: 4000, settle_secs: 0.3, clipped: true }
     }
 }
 
@@ -103,12 +110,14 @@ fn queue_chunks(
     mut queue: ResMut<FloraQueue>,
     lod_changed: Query<Entity, (With<Chunk>, Changed<LOD>)>,
     edited: Query<Entity, (With<Chunk>, Changed<SDF>)>,
+    revealed: Query<Entity, (With<Chunk>, Changed<VisibilityField>)>,
 ) {
     let now = time.elapsed_secs();
     for e in &lod_changed {
         queue.0.insert(e, now);
     }
-    for e in &edited {
+    let shown_changed = revealed.iter().filter(|_| flora.clipped);
+    for e in edited.iter().chain(shown_changed) {
         let due = queue.0.entry(e).or_insert(now);
         *due = due.max(now + flora.settle_secs);
     }
@@ -185,7 +194,7 @@ fn scatter_chunks<M: VoxelMaterial>(
         let origin = cp.as_vec3() * CHUNK_SIZE;
         let (min, max) = (origin.xz(), origin.xz() + Vec2::splat(CHUNK_SIZE));
         let (y0, y1) = (origin.y, origin.y + CHUNK_SIZE);
-        let view = terrain.unclipped();
+        let view = if flora.clipped { terrain.collider() } else { terrain.unclipped() };
         let mut ground = |p: Vec2| {
             casts = casts.saturating_add(1);
             let hit = cast(&view, Vec3::new(p.x, y1, p.y), Vec3::NEG_Y, CHUNK_SIZE)?;
