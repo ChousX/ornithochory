@@ -260,3 +260,123 @@ const fn tuft_name(tuft: &Tuft) -> &'static str {
         Tuft::Cushion { .. } => "Cushion",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn species(name: &str) -> Species {
+        let path = format!("{}/assets/species/{name}.plant.ron", env!("CARGO_MANIFEST_DIR"));
+        ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn paths(lever: PlantLever, species: &Species) -> Vec<String> {
+        lever.paths(species).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    #[test]
+    fn crown_levers_follow_the_envelope() {
+        let oak = species("oak");
+        let base = "form.Structure.growth.Colonize.envelope.Ellipsoid.radii";
+        assert_eq!(paths(PlantLever::CrownRadius, &oak), [format!("{base}.0"), format!("{base}.2")]);
+        assert_eq!(paths(PlantLever::CrownHeight, &oak), [format!("{base}.1")]);
+        let bush = species("bush");
+        assert_eq!(paths(PlantLever::CrownHeight, &bush), ["form.Structure.growth.LSystem.envelope.Ellipsoid.radii.1"]);
+        // The fern has no envelope, and recursive growth never does.
+        assert!(PlantLever::CrownRadius.paths(&species("fern")).is_err());
+        assert!(PlantLever::CrownRadius.paths(&species("spruce")).is_err());
+    }
+
+    #[test]
+    fn growth_levers_need_their_grower() {
+        let oak = species("oak");
+        assert_eq!(paths(PlantLever::Influence, &oak), ["form.Structure.growth.Colonize.influence"]);
+        assert_eq!(paths(PlantLever::Step, &oak), ["form.Structure.growth.Colonize.step"]);
+        assert!(PlantLever::Height.paths(&oak).is_err());
+        assert!(PlantLever::Angle.paths(&oak).is_err());
+
+        let spruce = species("spruce");
+        assert_eq!(paths(PlantLever::Height, &spruce), ["form.Structure.growth.Recursive.height"]);
+        let level = "form.Structure.growth.Recursive.levels.1";
+        assert_eq!(paths(PlantLever::LevelAngle(1), &spruce), [format!("{level}.angle.0"), format!("{level}.angle.1")]);
+        assert!(PlantLever::LevelCount(2).paths(&spruce).is_err(), "the spruce has two levels");
+        assert!(PlantLever::Kill.paths(&spruce).is_err());
+
+        let bush = species("bush");
+        assert_eq!(paths(PlantLever::Define("stems".into()), &bush), ["form.Structure.growth.LSystem.defines.stems"]);
+        assert!(PlantLever::Define("nope".into()).paths(&bush).is_err());
+        assert_eq!(paths(PlantLever::Angle, &bush), ["form.Structure.growth.LSystem.angle"]);
+    }
+
+    #[test]
+    fn structure_and_cover_levers_stay_apart() {
+        let oak = species("oak");
+        assert_eq!(paths(PlantLever::LeafColor(1), &oak), ["form.Structure.leaves.color.1"]);
+        assert!(PlantLever::LeafColor(3).paths(&oak).is_err(), "three colour channels");
+        assert_eq!(paths(PlantLever::TipRadius, &oak), ["form.Structure.tip_radius"]);
+        assert!(PlantLever::Dry.paths(&oak).is_err());
+
+        let grass = species("grass");
+        assert_eq!(paths(PlantLever::Height, &grass), ["form.Cover.tuft.Blades.height"]);
+        assert_eq!(paths(PlantLever::BladeCount, &grass), ["form.Cover.tuft.Blades.count"]);
+        assert_eq!(paths(PlantLever::CoverColor(0), &grass), ["form.Cover.color.0"]);
+        assert!(PlantLever::Radius.paths(&grass).is_err());
+        assert!(PlantLever::TipRadius.paths(&grass).is_err());
+
+        let moss = species("moss");
+        assert_eq!(paths(PlantLever::Radius, &moss), ["form.Cover.tuft.Cushion.radius"]);
+        assert_eq!(paths(PlantLever::Height, &moss), ["form.Cover.tuft.Cushion.height"]);
+        assert!(PlantLever::Lean.paths(&moss).is_err(), "a cushion has no blades");
+
+        // Placement applies to every species.
+        for s in [&oak, &grass, &moss] {
+            assert_eq!(paths(PlantLever::Spacing, s), ["placement.spacing"]);
+            assert_eq!(paths(PlantLever::Probability, s), ["placement.probability"]);
+        }
+    }
+
+    #[test]
+    fn ranges_are_ordered_and_counts_are_whole() {
+        let all = [
+            PlantLever::Height,
+            PlantLever::Radius,
+            PlantLever::Step,
+            PlantLever::Angle,
+            PlantLever::Tropism,
+            PlantLever::Define("k".into()),
+            PlantLever::CrownRadius,
+            PlantLever::CrownHeight,
+            PlantLever::Influence,
+            PlantLever::Kill,
+            PlantLever::Inertia,
+            PlantLever::TrunkWander,
+            PlantLever::LevelCount(0),
+            PlantLever::LevelAngle(0),
+            PlantLever::LevelLength(0),
+            PlantLever::LevelCurve(0),
+            PlantLever::TipRadius,
+            PlantLever::PipeExponent,
+            PlantLever::LeafLength,
+            PlantLever::LeafWidth,
+            PlantLever::LeafDroop,
+            PlantLever::LeafCluster,
+            PlantLever::BarkColor(0),
+            PlantLever::LeafColor(0),
+            PlantLever::CoverColor(0),
+            PlantLever::BarkRoughness,
+            PlantLever::Dry,
+            PlantLever::Lean,
+            PlantLever::BladeCount,
+            PlantLever::Spacing,
+            PlantLever::Probability,
+        ];
+        for lever in &all {
+            let (lo, hi) = lever.range();
+            assert!(lo < hi, "{lever:?}");
+            if lever.is_count() {
+                assert!(lo >= 0.0 && lo.fract().abs() < f32::EPSILON && hi.fract().abs() < f32::EPSILON, "{lever:?}");
+            }
+        }
+        assert_eq!(all.iter().filter(|l| l.is_count()).count(), 3);
+    }
+}

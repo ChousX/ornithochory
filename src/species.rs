@@ -406,3 +406,40 @@ impl AssetLoader for SpeciesLoader {
         &["plant.ron"]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The species the README shows, as it is written there: what it leaves
+    /// out takes the defaults.
+    #[test]
+    fn the_readme_species_parses() {
+        let readme = include_str!("../README.md");
+        let block = readme.split("```ron").nth(1).and_then(|s| s.split("```").next()).unwrap();
+        let s: Species = ron::from_str(block).unwrap();
+        assert_eq!((s.name.as_str(), s.variants), ("oak", 6));
+        let Form::Structure(st) = &s.form else { panic!("the oak is a structure") };
+        assert!(matches!(st.growth, Growth::Colonize(_)));
+        assert_eq!(st.bark, Bark::default());
+        assert!((st.pipe_exponent - default_pipe_exponent()).abs() < f32::EPSILON);
+        assert!((s.placement.spacing - 7.0).abs() < f32::EPSILON);
+        assert_eq!(s.placement.altitude, Placement::default().altitude);
+    }
+
+    #[test]
+    fn a_bare_cover_takes_the_defaults() {
+        let s: Species = ron::from_str(
+            "(name: \"g\", form: Cover((tuft: Blades(count: 4, height: 0.2, width: 0.01, lean: 0.2, segments: 2), color: (0.2, 0.4, 0.1))))",
+        )
+        .unwrap();
+        assert_eq!(s.variants, default_variants());
+        assert_eq!(s.placement, Placement::default());
+        let Form::Cover(c) = &s.form else { panic!("a cover") };
+        assert!((c.shade - default_shade()).abs() < f32::EPSILON);
+        assert_eq!(c.dry_color, default_dry_color());
+        let Tuft::Blades { spread, height_jitter, .. } = c.tuft else { panic!("blades") };
+        assert!((spread - default_spread()).abs() < f32::EPSILON);
+        assert!((height_jitter - default_height_jitter()).abs() < f32::EPSILON);
+    }
+}

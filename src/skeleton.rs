@@ -272,6 +272,22 @@ mod tests {
     }
 
     #[test]
+    fn lengths_and_bounds_measure_the_stems() {
+        let mut s = fork();
+        let len = s.path_lengths();
+        assert!(len[0].abs() < 1e-6 && (len[2] - 2.0).abs() < 1e-6);
+        // Up the trunk, then out along the side branch.
+        let side = 2.0 + Vec2::new(0.5, 0.5).length() + Vec2::new(0.3, 0.3).length();
+        assert!((len[5] - side).abs() < 1e-5, "{}", len[5]);
+        s.pipe_radii(0.01, 2.0);
+        let (lo, hi) = s.bounds();
+        let r0 = s.nodes[0].radius;
+        assert!((lo.y + r0).abs() < 1e-6 && (lo.x + 0.8 + 0.01).abs() < 1e-6, "{lo}");
+        assert!((hi.y - 3.0 - 0.01).abs() < 1e-6, "{hi}");
+        assert_eq!(s.subtree_sizes(), [6, 5, 4, 1, 2, 1]);
+    }
+
+    #[test]
     fn tips_are_zero_from_a_tip() {
         let d = fork().tip_distances();
         assert_eq!(d[3], 0);
