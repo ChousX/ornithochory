@@ -19,11 +19,11 @@
 //!
 //! Integrations, each behind its feature:
 //! - `tarasaur`: species scatter over terrain chunks as they stream in and
-//!   re-scatter where the terrain is edited ([`integrate::tarasaur`]).
+//!   re-scatter where the terrain is edited (`integrate::tarasaur`).
 //! - `ornisculpt`: mobs push plants aside and ornisculpt's `TierCamera`
-//!   also picks plant tiers ([`integrate::ornisculpt`]).
+//!   also picks plant tiers (`integrate::ornisculpt`).
 //! - `genetics`: a whole species as one genome (`design`), whose
-//!   [`lever`]s name the values a design lets vary.
+//!   `lever`s name the values a design lets vary.
 //!
 //! Research behind the design: `docs/research/procedural-plants.md`.
 
@@ -35,6 +35,7 @@ pub mod design;
 pub mod generate;
 pub mod grow;
 pub mod integrate;
+#[cfg(feature = "genetics")]
 pub mod lever;
 pub mod mesh;
 pub mod num;

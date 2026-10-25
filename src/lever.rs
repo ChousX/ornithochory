@@ -1,5 +1,5 @@
-//! Plant levers: the values of a [`Species`] a design may vary, each with the
-//! bounds it makes sense within.
+//! Plant levers (`genetics` feature): the values of a [`Species`] a design
+//! may vary, each with the bounds it makes sense within.
 //!
 //! A lever names one or more values by their place in the species (the paths
 //! a `genetics` genome uses; see [`crate::design`]), so which ones it reaches
