@@ -26,6 +26,36 @@ use crate::random::{PlantRng, hash_unit};
 use crate::scatter::Placed;
 use crate::species::{Form, Species};
 
+/// Generates, attaches and tiers [`Plant`]s and [`CoverPatch`]es. Added by
+/// [`crate::OrnithochoryPlugin`].
+#[derive(Default)]
+pub struct PlantPlugin;
+
+impl Plugin for PlantPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PlantLibrary>()
+            .init_resource::<PlantQuality>()
+            .configure_sets(Update, (PlantSet::Generate, PlantSet::Tier).chain())
+            .add_systems(
+                Update,
+                (
+                    (
+                        reload_species,
+                        request_variants,
+                        poll_variants,
+                        attach_plants,
+                        apply_plant_materials,
+                        build_cover,
+                        finish_cover,
+                    )
+                        .chain()
+                        .in_set(PlantSet::Generate),
+                    choose_tiers.in_set(PlantSet::Tier),
+                ),
+            );
+    }
+}
+
 /// One plant. Its `Transform` places the root.
 #[derive(Component, Clone, Debug)]
 #[require(Transform, Visibility)]
@@ -157,7 +187,7 @@ impl SpeciesMaterials {
 }
 
 /// Applies a changed [`PlantMaterials`] to plants and patches already shown.
-pub(crate) fn apply_plant_materials(
+fn apply_plant_materials(
     mut commands: Commands,
     species: Res<Assets<Species>>,
     mut library: ResMut<PlantLibrary>,
@@ -302,7 +332,7 @@ fn variant_of(species: &Species, seed: u64) -> u8 {
     seed.checked_rem(n).and_then(|v| u8::try_from(v).ok()).unwrap_or(0)
 }
 
-pub(crate) fn request_variants(
+fn request_variants(
     plants: Query<&Plant, Without<PlantParts>>,
     species: Res<Assets<Species>>,
     quality: Res<PlantQuality>,
@@ -325,7 +355,7 @@ pub(crate) fn request_variants(
     }
 }
 
-pub(crate) fn poll_variants(mut library: ResMut<PlantLibrary>, mut meshes: ResMut<Assets<Mesh>>) {
+fn poll_variants(mut library: ResMut<PlantLibrary>, mut meshes: ResMut<Assets<Mesh>>) {
     for slot in library.variants.values_mut() {
         let VariantSlot::Pending(task) = slot else { continue };
         let Some(done) = check_ready(task) else { continue };
@@ -350,7 +380,7 @@ fn show(commands: &mut Commands, part: Entity, handle: Option<&Handle<Mesh>>) {
     }
 }
 
-pub(crate) fn attach_plants(
+fn attach_plants(
     mut commands: Commands,
     plants: Query<(Entity, &Plant, Option<&ForcePlantTier>, Option<&PlantMaterials>), Without<PlantParts>>,
     species: Res<Assets<Species>>,
@@ -446,7 +476,7 @@ pub(crate) fn choose_tiers(
 
 /// Edited species regenerate: their variants and materials are dropped and
 /// their plants re-attached.
-pub(crate) fn reload_species(
+fn reload_species(
     mut commands: Commands,
     mut events: MessageReader<AssetEvent<Species>>,
     mut library: ResMut<PlantLibrary>,
@@ -500,7 +530,7 @@ pub struct CoverPatch {
 pub struct CoverBuilt;
 
 #[derive(Component)]
-pub(crate) struct CoverTask(Task<MeshData>);
+struct CoverTask(Task<MeshData>);
 
 /// Merges a patch's tufts: one tuft mesh per variant, copied to every
 /// placement with a per-tuft brightness and warmth tint.
@@ -521,7 +551,7 @@ pub fn merge_cover(species: &Species, tufts: &[Placed], lod: PlantLod) -> MeshDa
     out
 }
 
-pub(crate) fn build_cover(
+fn build_cover(
     mut commands: Commands,
     quality: Res<PlantQuality>,
     species: Res<Assets<Species>>,
@@ -545,7 +575,7 @@ pub(crate) fn build_cover(
     }
 }
 
-pub(crate) fn finish_cover(
+fn finish_cover(
     mut commands: Commands,
     species: Res<Assets<Species>>,
     mut library: ResMut<PlantLibrary>,

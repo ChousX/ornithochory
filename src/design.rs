@@ -180,7 +180,9 @@ impl AssetLoader for PlantDesignLoader {
     }
 }
 
-/// Registers [`PlantDesign`] assets and their loader.
+/// Registers [`PlantDesign`] assets and their loader. Added by
+/// [`crate::OrnithochoryPlugin`].
+#[derive(Default)]
 pub struct PlantDesignPlugin;
 
 impl Plugin for PlantDesignPlugin {

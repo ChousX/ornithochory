@@ -14,6 +14,17 @@ use thiserror::Error;
 
 use crate::grow::Growth;
 
+/// Registers [`Species`] assets and their loader. Added by
+/// [`crate::OrnithochoryPlugin`].
+#[derive(Default)]
+pub struct SpeciesPlugin;
+
+impl Plugin for SpeciesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_asset::<Species>().init_asset_loader::<SpeciesLoader>();
+    }
+}
+
 #[derive(Asset, TypePath, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Species {
     pub name: String,

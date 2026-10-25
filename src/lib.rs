@@ -40,41 +40,14 @@ pub mod species;
 
 use bevy::prelude::*;
 
-use crate::bend::Benders;
-use crate::plant::{PlantLibrary, PlantQuality, PlantSet};
-use crate::species::{Species, SpeciesLoader};
-
-/// Adds plant assets, generation, tiers and interaction.
+/// Adds plant assets, generation, tiers and interaction: every module's
+/// plugin, and `design::PlantDesignPlugin` with the `genetics` feature.
 #[derive(Default)]
 pub struct OrnithochoryPlugin;
 
 impl Plugin for OrnithochoryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_asset::<Species>()
-            .init_asset_loader::<SpeciesLoader>()
-            .init_resource::<PlantLibrary>()
-            .init_resource::<PlantQuality>()
-            .init_resource::<Benders>()
-            .configure_sets(Update, (PlantSet::Generate, PlantSet::Tier).chain())
-            .add_systems(
-                Update,
-                (
-                    (
-                        plant::reload_species,
-                        plant::request_variants,
-                        plant::poll_variants,
-                        plant::attach_plants,
-                        plant::apply_plant_materials,
-                        plant::build_cover,
-                        plant::finish_cover,
-                    )
-                        .chain()
-                        .in_set(PlantSet::Generate),
-                    (plant::choose_tiers, bend::gather_benders, bend::lean_plants)
-                        .chain()
-                        .in_set(PlantSet::Tier),
-                ),
-            );
+        app.add_plugins((species::SpeciesPlugin, plant::PlantPlugin, bend::BendPlugin));
         #[cfg(feature = "genetics")]
         app.add_plugins(design::PlantDesignPlugin);
     }

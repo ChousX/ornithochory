@@ -8,8 +8,20 @@
 
 use bevy::prelude::*;
 
-use crate::plant::{PlantCamera, PlantParts, PlantTier, tier_cameras};
+use crate::plant::{PlantCamera, PlantParts, PlantSet, PlantTier, choose_tiers, tier_cameras};
 use crate::mesh::PlantLod;
+
+/// Gathers [`Benders`] and leans small plants away from them, once tiers
+/// are chosen. Added by [`crate::OrnithochoryPlugin`].
+#[derive(Default)]
+pub struct BendPlugin;
+
+impl Plugin for BendPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Benders>()
+            .add_systems(Update, (gather_benders, lean_plants).chain().in_set(PlantSet::Tier).after(choose_tiers));
+    }
+}
 
 /// Pushes plants within `radius` metres aside.
 #[derive(Component, Clone, Copy, Debug)]
@@ -39,7 +51,7 @@ const MAX_LEAN: f32 = 0.45;
 /// How fast a plant follows its lean, per second.
 const LEAN_RATE: f32 = 8.0;
 
-pub(crate) fn gather_benders(
+fn gather_benders(
     cameras: Query<(&GlobalTransform, &Projection, &Camera, Has<PlantCamera>, Has<Camera3d>)>,
     benders: Query<(&GlobalTransform, &FoliageBender)>,
     mut out: ResMut<Benders>,
@@ -58,7 +70,7 @@ pub(crate) fn gather_benders(
     out.0.extend(all.into_iter().take(Benders::MAX).map(|(_, v)| v));
 }
 
-pub(crate) fn lean_plants(
+fn lean_plants(
     time: Res<Time>,
     benders: Res<Benders>,
     plants: Query<(&GlobalTransform, &PlantParts, &PlantTier)>,
