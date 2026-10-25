@@ -27,48 +27,68 @@ use crate::species::Leaves;
 /// 137.5 degrees: successive leaves around a stem never line up.
 const GOLDEN_ANGLE: f32 = 2.399_963;
 
+/// The smallest share of leaves a species' `lod_keep` can keep.
+const MIN_KEEP: f32 = 0.01;
+/// A kept leaf grows by `1 / keep` in area: by `keep^-LENGTH_SHARE` in
+/// length and `keep^-WIDTH_SHARE` in width. More in width than in length:
+/// a few long spikes would fray the silhouette, rounder blobs keep it.
+const LENGTH_SHARE: f32 = 0.35;
+/// See [`LENGTH_SHARE`]; the two sum to 1.
+const WIDTH_SHARE: f32 = 0.65;
+/// The smallest clump of leaves `clump_size` can ask for, metres.
+const MIN_CLUMP_SIZE: f32 = 0.05;
+/// `OpenSimplex2` is roughly symmetric about 0 with most values within
+/// `+-CLUMP_NOISE_SPAN`, so a threshold that far into it cuts about
+/// `clumping` of the leaves.
+const CLUMP_NOISE_SPAN: f32 = 0.6;
+/// The crown proxy's smallest half-width, metres, so a crown one stem
+/// across still has an inside and an outside.
+const MIN_CROWN_HALF: f32 = 0.05;
+/// Mixed into the seed (by xor) for the hash that gives each leaf node its
+/// wind phase, apart from the hashes that thin leaves.
+const PHASE_SALT: u64 = 0x1eaf;
+/// Each leaf of a clump fans out by `cluster_spread` times a draw from this
+/// range.
+const SPREAD_JITTER: (f32, f32) = (0.7, 1.2);
+/// Each leaf droops by `droop` times a draw from this range.
+const DROOP_JITTER: (f32, f32) = (0.7, 1.3);
+/// The furthest a leaf turns towards straight down, as a fraction of the
+/// way there.
+const MAX_DROOP: f32 = 0.9;
+/// Each leaf's size is the species' times a draw from this range.
+const SIZE_JITTER: (f32, f32) = (0.8, 1.2);
+/// A leaf's face turns to whichever side looks more outwards from the crown
+/// and up; this much up, against the crown's outward normal.
+const SKY_BIAS: f32 = 0.5;
+/// How far a leaf curls back from its face by its tip, in leaf lengths.
+const CURL: f32 = 0.25;
+/// A plain blade is `sin(pi * t^WIDEST)` wide at `t` of the way up: widest
+/// at 40% (0.4^0.756 is about 0.5).
+const WIDEST: f32 = 0.756;
+/// A lobed leaf's tooth reaches this many midrib steps beyond its base,
+/// leaning towards the tip.
+const TOOTH_REACH: f32 = 1.3;
+/// The last tooth stops this many midrib steps short of the tip.
+const TOOTH_TIP_GAP: f32 = 0.3;
+/// A lobed leaf's outline is the plain blade's sine from this far along
+/// it, so the lowest teeth aren't stubs.
+const LOBED_OUTLINE_START: f32 = 0.25;
+
 /// The leaves of `skel` at `lod`.
 #[must_use]
 pub fn leaves(skel: &PlantSkeleton, spec: &Leaves, lod: PlantLod, seed: u64) -> MeshData {
     let mut out = MeshData::default();
     let lengths = skel.path_lengths();
     let reach = lengths.iter().copied().fold(1e-3, f32::max);
-    let keep = match (lod, spec.lod_keep) {
-        (PlantLod::Near, Some((near, _))) => near.clamp(0.01, 1.0),
-        (PlantLod::Far, Some((_, far))) => far.clamp(0.01, 1.0),
-        _ => lod.leaf_keep(),
-    };
-    // Kept leaves grow so the crown's leaf area stays the same, more in
-    // width than in length: a few long spikes would fray the silhouette,
-    // rounder blobs keep it.
-    let (grow_long, grow_wide) = (keep.powf(-0.35), keep.powf(-0.65));
+    let keep = kept_share(spec, lod);
+    // Kept leaves grow so the crown's leaf area stays the same.
+    let (grow_long, grow_wide) = (keep.powf(-LENGTH_SHARE), keep.powf(-WIDTH_SHARE));
     let segments = lod.segments(spec.segments);
     let base = Color::srgb(spec.color[0], spec.color[1], spec.color[2]).to_linear();
 
     let mut hung = hang(skel, spec);
-
-    // The crown proxy: an ellipsoid around every leaf's stem node.
-    let (lo, hi) = hung.iter().filter_map(|h| skel.node(h.0)).fold(
-        (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
-        |(lo, hi), n| (lo.min(n.pos), hi.max(n.pos)),
-    );
-    // Clumping: a smooth 3D noise over the crown; leaves where it is low
-    // are left out, so foliage gathers into masses with holes between.
-    let clumps = (spec.clumping > 0.0).then(|| {
-        let [b0, b1, b2, b3, ..] = seed.to_le_bytes();
-        let mut f = FastNoiseLite::with_seed(i32::from_le_bytes([b0, b1, b2, b3]));
-        f.set_noise_type(Some(NoiseType::OpenSimplex2));
-        f.set_frequency(Some(spec.clump_size.max(0.05).recip()));
-        f
-    });
-    // OpenSimplex2 is roughly symmetric about 0 with most values within
-    // +-0.6, so this cuts about `clumping` of the leaves.
-    let threshold = spec.clumping.clamp(0.0, 1.0).mul_add(1.2, -0.6);
-    hung.retain(|h| {
-        clumps.as_ref().is_none_or(|f| skel.node(h.0).is_some_and(|n| f.get_noise_3d(n.pos.x, n.pos.y, n.pos.z) >= threshold))
-    });
-    let centre = (lo + hi) * 0.5;
-    let half = ((hi - lo) * 0.5).max(Vec3::splat(0.05));
+    let crown = Crown::around(skel, &hung);
+    thin_to_clumps(&mut hung, skel, spec, seed);
     let cluster = spec.cluster.max(1);
 
     for (k, (node, dir, scale)) in hung.into_iter().enumerate() {
@@ -81,13 +101,10 @@ pub fn leaves(skel: &PlantSkeleton, spec: &Leaves, lod: PlantLod, seed: u64) -> 
         // Each leaf's own stream, for the same reason.
         let mut rng = PlantRng::new(crate::random::stable_hash(seed ^ k, "leaf"));
         let Some(n) = skel.node(node) else { continue };
-        let local = (n.pos - centre) / half;
-        // Ellipsoid gradient: the crown's outward normal here.
-        let outward = (local / half).normalize_or(Vec3::Y);
-        let depth = local.length().min(1.0);
+        let (outward, depth) = crown.at(n.pos);
         let occlusion = spec.inner_shade.clamp(0.0, 1.0).mul_add(depth - 1.0, 1.0);
         let path = lengths.get(usize_from(node)).copied().unwrap_or(0.0);
-        let wind = Vec4::new(path / reach, 1.0, hash_unit(seed ^ 0x1eaf, u64::from(node)), 1.0);
+        let wind = Vec4::new(path / reach, 1.0, hash_unit(seed ^ PHASE_SALT, u64::from(node)), 1.0);
         let fan = dir.any_orthonormal_vector();
         // Only clumps draw a roll, so single leaves keep their old stream.
         let roll = if cluster > 1 { rng.range(0.0, std::f32::consts::TAU) } else { 0.0 };
@@ -97,15 +114,15 @@ pub fn leaves(skel: &PlantSkeleton, spec: &Leaves, lod: PlantLod, seed: u64) -> 
                 dir
             } else {
                 let around = Quat::from_axis_angle(dir, GOLDEN_ANGLE.mul_add(f32_from_u32(u32::from(c)), roll)) * fan;
-                let (s, co) = (spec.cluster_spread * rng.range(0.7, 1.2)).sin_cos();
+                let (s, co) = (spec.cluster_spread * rng.range(SPREAD_JITTER.0, SPREAD_JITTER.1)).sin_cos();
                 (dir * co + around * s).normalize_or(dir)
             };
             let jitter = rng.signed() * spec.color_jitter;
             let shade = (1.0 + jitter).max(0.0) * occlusion;
             let color = LinearRgba::rgb(base.red * shade, base.green * shade, base.blue * shade);
-            let droop = spec.droop * rng.range(0.7, 1.3);
-            let dir = dir.lerp(Vec3::NEG_Y, (droop / std::f32::consts::PI).clamp(0.0, 0.9)).normalize_or(dir);
-            let size = scale * rng.range(0.8, 1.2);
+            let droop = spec.droop * rng.range(DROOP_JITTER.0, DROOP_JITTER.1);
+            let dir = dir.lerp(Vec3::NEG_Y, (droop / std::f32::consts::PI).clamp(0.0, MAX_DROOP)).normalize_or(dir);
+            let size = scale * rng.range(SIZE_JITTER.0, SIZE_JITTER.1);
             let mesh = if spec.lobes > 0 && lod == PlantLod::Hero { lobed } else { blade };
             mesh(
                 &mut out,
@@ -125,6 +142,54 @@ pub fn leaves(skel: &PlantSkeleton, spec: &Leaves, lod: PlantLod, seed: u64) -> 
         }
     }
     out
+}
+
+/// The share of leaves `lod` keeps: the species' own `lod_keep`, or the
+/// tier's default.
+const fn kept_share(spec: &Leaves, lod: PlantLod) -> f32 {
+    match (lod, spec.lod_keep) {
+        (PlantLod::Near, Some((near, _))) => near.clamp(MIN_KEEP, 1.0),
+        (PlantLod::Far, Some((_, far))) => far.clamp(MIN_KEEP, 1.0),
+        _ => lod.leaf_keep(),
+    }
+}
+
+/// The crown proxy: an ellipsoid around every leaf's stem node, which leaf
+/// normals bend towards and inner leaves are shaded by.
+struct Crown {
+    centre: Vec3,
+    half: Vec3,
+}
+
+impl Crown {
+    fn around(skel: &PlantSkeleton, hung: &[(u32, Vec3, f32)]) -> Self {
+        let (lo, hi) = hung.iter().filter_map(|h| skel.node(h.0)).fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(lo, hi), n| (lo.min(n.pos), hi.max(n.pos)),
+        );
+        Self { centre: (lo + hi) * 0.5, half: ((hi - lo) * 0.5).max(Vec3::splat(MIN_CROWN_HALF)) }
+    }
+
+    /// The crown's outward normal at `pos` (the ellipsoid's gradient), and
+    /// how deep in it `pos` is: 0 at the centre, 1 on the surface and out.
+    fn at(&self, pos: Vec3) -> (Vec3, f32) {
+        let local = (pos - self.centre) / self.half;
+        ((local / self.half).normalize_or(Vec3::Y), local.length().min(1.0))
+    }
+}
+
+/// Clumping: a smooth 3D noise over the crown; leaves where it is low are
+/// left out, so foliage gathers into masses with holes between.
+fn thin_to_clumps(hung: &mut Vec<(u32, Vec3, f32)>, skel: &PlantSkeleton, spec: &Leaves, seed: u64) {
+    // Written so that a `clumping` of 0 (or NaN) keeps every leaf.
+    if spec.clumping > 0.0 {
+        let [b0, b1, b2, b3, ..] = seed.to_le_bytes();
+        let mut noise = FastNoiseLite::with_seed(i32::from_le_bytes([b0, b1, b2, b3]));
+        noise.set_noise_type(Some(NoiseType::OpenSimplex2));
+        noise.set_frequency(Some(spec.clump_size.max(MIN_CLUMP_SIZE).recip()));
+        let threshold = spec.clumping.clamp(0.0, 1.0).mul_add(2.0 * CLUMP_NOISE_SPAN, -CLUMP_NOISE_SPAN);
+        hung.retain(|h| skel.node(h.0).is_some_and(|n| noise.get_noise_3d(n.pos.x, n.pos.y, n.pos.z) >= threshold));
+    }
 }
 
 /// (node, direction, scale) for every leaf before LOD thinning: the
@@ -195,7 +260,7 @@ impl Blade {
         let up = if self.dir.y.abs() > 0.95 { Vec3::X } else { Vec3::Y };
         let across = self.dir.cross(up).normalize_or(Vec3::X);
         let face = across.cross(self.dir).normalize_or(Vec3::Y);
-        let facing = if face.dot(self.outward + Vec3::Y * 0.5) < 0.0 { -face } else { face };
+        let facing = if face.dot(self.outward + Vec3::Y * SKY_BIAS) < 0.0 { -face } else { face };
         (across, face, facing.lerp(self.outward, self.bend).normalize_or(facing))
     }
 }
@@ -204,7 +269,7 @@ impl Blade {
 fn blade(out: &mut MeshData, b: &Blade) {
     let (dir, length, segments) = (b.dir, b.length, b.segments);
     let (across, face, normal) = b.frame();
-    let curl = 0.25 * length;
+    let curl = CURL * length;
 
     // A point at the stalk, `segments` rows of two across the blade, a
     // point at the tip: a diamond at 1 segment, rounder with more.
@@ -213,8 +278,7 @@ fn blade(out: &mut MeshData, b: &Blade) {
     let first = out.vertex(at(0.0), normal, Vec2::new(0.5, 0.0), b.wind, Some(b.color));
     for s in 1..=segments {
         let t = f32_from_u32(s) / rows;
-        // Widest about 40% of the way up.
-        let half = b.width * 0.5 * (std::f32::consts::PI * t.powf(0.756)).sin();
+        let half = b.width * 0.5 * (std::f32::consts::PI * t.powf(WIDEST)).sin();
         let mid = at(t);
         out.vertex(mid - across * half, normal, Vec2::new(0.0, t), b.wind, Some(b.color));
         out.vertex(mid + across * half, normal, Vec2::new(1.0, t), b.wind, Some(b.color));
@@ -238,7 +302,7 @@ fn blade(out: &mut MeshData, b: &Blade) {
 fn lobed(out: &mut MeshData, b: &Blade) {
     let (across, face, normal) = b.frame();
     let (length, width, lobes) = (b.length, b.width, b.lobes.max(1));
-    let curl = 0.25 * length;
+    let curl = CURL * length;
     let mid = |t: f32| b.root + b.dir * (length * t) - face * (curl * t * t);
     let steps = f32_from_u32(lobes);
 
@@ -253,8 +317,8 @@ fn lobed(out: &mut MeshData, b: &Blade) {
         // sinuses between teeth come halfway to the midrib, as on a
         // pinnatifid fern pinna. Its tip leans towards the leaf's tip and is
         // as wide as the plain blade's outline there.
-        let t = ((f32_from_u32(j) + 1.3) / steps).min(1.0 - 0.3 / steps);
-        let half = width * 0.5 * (std::f32::consts::PI * t.mul_add(0.75, 0.25)).sin();
+        let t = ((f32_from_u32(j) + TOOTH_REACH) / steps).min(1.0 - TOOTH_TIP_GAP / steps);
+        let half = width * 0.5 * (std::f32::consts::PI * t.mul_add(1.0 - LOBED_OUTLINE_START, LOBED_OUTLINE_START)).sin();
         let (a, c) = (first.wrapping_add(j), first.wrapping_add(j.saturating_add(2).min(lobes)));
         let left = out.vertex(mid(t) - across * half, normal, Vec2::new(0.0, t), b.wind, Some(b.color));
         out.triangle(a, c, left);
