@@ -167,14 +167,23 @@ pub enum PlantSet {
 
 type VariantKey = (AssetId<Species>, u8);
 
-/// One variant's uploaded meshes: `(stems, foliage)` per tier.
+/// One variant's uploaded meshes, per tier.
 #[derive(Clone, Debug)]
 pub struct ReadyVariant {
-    /// Per tier, in [`PlantLod::index`] order; `None` where a tier has no
-    /// triangles of that part.
-    pub tiers: [(Option<Handle<Mesh>>, Option<Handle<Mesh>>); 3],
+    /// Per tier, in [`PlantLod::index`] order.
+    pub tiers: [ReadyTier; 3],
     /// Distance from the plant's origin to its farthest point, metres.
     pub radius: f32,
+}
+
+/// One tier of a [`ReadyVariant`]: its meshes, `None` where the tier has no
+/// triangles of that part.
+#[derive(Clone, Debug, Default)]
+pub struct ReadyTier {
+    /// The stems, drawn with the bark material.
+    pub stems: Option<Handle<Mesh>>,
+    /// Leaves, blades or cushions, drawn with the foliage material.
+    pub foliage: Option<Handle<Mesh>>,
 }
 
 enum VariantSlot {
@@ -401,7 +410,7 @@ fn poll_variants(mut library: ResMut<PlantLibrary>, mut meshes: ResMut<Assets<Me
         let Some(done) = check_ready(task) else { continue };
         let mut upload = |m: MeshData| (!m.is_empty()).then(|| meshes.add(m.into_mesh()));
         let [hero, near, far] = done.tiers;
-        let mut tier = |t: crate::generate::TierMeshes| (upload(t.stems), upload(t.foliage));
+        let mut tier = |t: crate::generate::TierMeshes| ReadyTier { stems: upload(t.stems), foliage: upload(t.foliage) };
         let tiers = [tier(hero), tier(near), tier(far)];
         *slot = VariantSlot::Ready(ReadyVariant { tiers, radius: done.radius });
     }
@@ -438,9 +447,9 @@ fn attach_plants(
         let tier = force.map_or(PlantLod::Far, |f| f.0);
         let stems = commands.spawn((PlantPart, MeshMaterial3d(mats.bark), ChildOf(entity))).id();
         let foliage = commands.spawn((PlantPart, MeshMaterial3d(mats.foliage), ChildOf(entity))).id();
-        if let Some((st, fo)) = ready.tiers.get(tier.index()) {
-            show(&mut commands, stems, st.as_ref());
-            show(&mut commands, foliage, fo.as_ref());
+        if let Some(meshes) = ready.tiers.get(tier.index()) {
+            show(&mut commands, stems, meshes.stems.as_ref());
+            show(&mut commands, foliage, meshes.foliage.as_ref());
         }
         commands
             .entity(entity)
@@ -512,9 +521,9 @@ pub(crate) fn choose_tiers(
         }
         let Some(s) = species.get(&plant.species) else { continue };
         let Some(ready) = library.ready(plant.species.id(), variant_of(s, plant.seed)) else { continue };
-        let Some((st, fo)) = ready.tiers.get(next.index()) else { continue };
-        show(&mut commands, parts.stems, st.as_ref());
-        show(&mut commands, parts.foliage, fo.as_ref());
+        let Some(meshes) = ready.tiers.get(next.index()) else { continue };
+        show(&mut commands, parts.stems, meshes.stems.as_ref());
+        show(&mut commands, parts.foliage, meshes.foliage.as_ref());
         tier.0 = next;
     }
 }
