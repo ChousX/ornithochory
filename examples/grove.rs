@@ -29,6 +29,7 @@ use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::ExitCondition;
 use bevy::winit::WinitPlugin;
+use ornithochory::num::f32_from_u32;
 use ornithochory::plant::CoverBuilt;
 use ornithochory::prelude::*;
 
@@ -282,7 +283,14 @@ fn shot_target(
 
 /// Frames a view is shown before it is shot: tiers settle and new meshes upload.
 const SETTLE_FRAMES: u32 = 20;
+/// Frames the overview's frame time is averaged over.
 const TIMING_FRAMES: u32 = 240;
+/// Frames to wait at least before trusting that nothing is left to
+/// generate: plants and patches spawn in the first frames.
+const FIRST_FRAMES: u32 = 10;
+/// Frames to wait for the last screenshot to be written before exiting
+/// anyway.
+const SAVE_TIMEOUT_FRAMES: u32 = 600;
 
 /// Every stemmed species forced to each tier, Hero to Far, left to right.
 fn tier_rows(mut commands: Commands, assets: Res<AssetServer>) {
@@ -320,7 +328,7 @@ fn shoot(
     };
     match shots.stage {
         Stage::Generating => {
-            if cover.is_none() && waiting_plants.is_empty() && waiting_patches.is_empty() && shots.frames > 10 {
+            if cover.is_none() && waiting_plants.is_empty() && waiting_patches.is_empty() && shots.frames > FIRST_FRAMES {
                 let secs = shots.started.elapsed().as_secs_f32();
                 info!("grove: everything generated in {secs:.2} s");
                 let _ = std::fs::create_dir_all(&shots.dir);
@@ -337,7 +345,7 @@ fn shoot(
                 shots.frame_secs += time.delta_secs();
             }
             if shots.frames >= TIMING_FRAMES.saturating_add(SETTLE_FRAMES) {
-                let ms = shots.frame_secs / 240.0 * 1000.0;
+                let ms = shots.frame_secs / f32_from_u32(TIMING_FRAMES) * 1000.0;
                 info!("grove: overview mean frame {ms:.2} ms");
                 let path = format!("{}/stats.txt", shots.dir);
                 let old = std::fs::read_to_string(&path).unwrap_or_default();
@@ -362,7 +370,7 @@ fn shoot(
         }
         Stage::Saving => {
             let last = VIEWS.last().map(|v| format!("{}/{}.png", shots.dir, v.0));
-            if last.is_some_and(|p| std::path::Path::new(&p).exists()) || shots.frames > 600 {
+            if last.is_some_and(|p| std::path::Path::new(&p).exists()) || shots.frames > SAVE_TIMEOUT_FRAMES {
                 exit.write(AppExit::Success);
             }
         }
