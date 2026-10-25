@@ -60,6 +60,7 @@ impl Plugin for PlantPlugin {
 #[derive(Component, Clone, Debug)]
 #[require(Transform, Visibility)]
 pub struct Plant {
+    /// What grows here.
     pub species: Handle<Species>,
     /// Picks the variant (`seed % variants`).
     pub seed: u64,
@@ -80,7 +81,9 @@ pub struct PlantCamera;
 /// white `base_color` to keep them, or set your own colours there.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PlantMaterials {
+    /// For stems in place of the species' bark.
     pub stems: Option<Handle<StandardMaterial>>,
+    /// For leaves, blades and cushions in place of the species' foliage.
     pub foliage: Option<Handle<StandardMaterial>>,
 }
 
@@ -109,8 +112,11 @@ pub struct ForcePlantTier(pub PlantLod);
 /// The child entities drawing a plant.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlantParts {
+    /// The child drawing the stems.
     pub stems: Entity,
+    /// The child drawing the leaves.
     pub foliage: Entity,
+    /// The variant's bounding radius, metres before the plant's scale.
     pub radius: f32,
 }
 
@@ -122,9 +128,10 @@ pub struct PlantPart;
 /// `QualityProfile`.
 #[derive(Resource, Clone, Debug)]
 pub struct PlantQuality {
-    /// On-screen height in pixels at or above which a plant is `Hero` /
-    /// `Near`; below is `Far`.
+    /// On-screen height in pixels at or above which a plant is `Hero`.
     pub hero_px: f32,
+    /// On-screen height in pixels at or above which a plant is `Near`;
+    /// below it is `Far`.
     pub near_px: f32,
     /// Fractional band a size must cross to change tier.
     pub hysteresis: f32,
@@ -141,8 +148,11 @@ impl Default for PlantQuality {
 }
 
 impl PlantQuality {
+    /// Coarse tiers and few tasks at once: weak GPUs and CPUs.
     pub const LOW: Self = Self { hero_px: 700.0, near_px: 160.0, hysteresis: 0.15, max_in_flight: 2, max_cover_in_flight: 2 };
+    /// The default.
     pub const MEDIUM: Self = Self { hero_px: 450.0, near_px: 100.0, hysteresis: 0.15, max_in_flight: 4, max_cover_in_flight: 4 };
+    /// Fine tiers from farther away, more tasks at once.
     pub const HIGH: Self = Self { hero_px: 300.0, near_px: 60.0, hysteresis: 0.15, max_in_flight: 8, max_cover_in_flight: 8 };
 }
 
@@ -160,7 +170,10 @@ type VariantKey = (AssetId<Species>, u8);
 /// One variant's uploaded meshes: `(stems, foliage)` per tier.
 #[derive(Clone, Debug)]
 pub struct ReadyVariant {
+    /// Per tier, in [`PlantLod::index`] order; `None` where a tier has no
+    /// triangles of that part.
     pub tiers: [(Option<Handle<Mesh>>, Option<Handle<Mesh>>); 3],
+    /// Distance from the plant's origin to its farthest point, metres.
     pub radius: f32,
 }
 
@@ -520,8 +533,11 @@ fn reload_species(
 #[derive(Component, Clone, Debug)]
 #[require(Transform, Visibility)]
 pub struct CoverPatch {
+    /// A cover species; a stemmed one makes an empty patch.
     pub species: Handle<Species>,
+    /// Where each tuft stands, relative to the patch.
     pub tufts: Arc<[Placed]>,
+    /// The tier every tuft is built at.
     pub lod: PlantLod,
 }
 

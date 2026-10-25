@@ -23,33 +23,44 @@ pub struct Node {
     /// Stem radius here, metres. Growers may leave 0 and call
     /// [`PlantSkeleton::pipe_radii`].
     pub radius: f32,
+    /// The node this one grows from; `None` only at the root.
     pub parent: Option<u32>,
     /// 0 = trunk (or main stem), 1 = its branches, ...
     pub order: u8,
 }
 
+/// What an [`Organ`] is. Only leaves are meshed so far.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OrganKind {
+    /// Meshed by [`crate::mesh::leaves`].
     #[default]
     Leaf,
+    /// A flower.
     Flower,
+    /// A fruit or seed head.
     Fruit,
 }
 
 /// Something hung on a node: a leaf, flower or fruit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Organ {
+    /// The node it hangs on.
     pub node: u32,
     /// Unit direction the organ points, from the node.
     pub dir: Vec3,
+    /// Leaf, flower or fruit.
     pub kind: OrganKind,
     /// Multiplies the species' organ size.
     pub scale: f32,
 }
 
+/// A grown plant before meshing: its stems as a tree of nodes, and the
+/// organs on them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlantSkeleton {
+    /// The root first; every parent before its children.
     pub nodes: Vec<Node>,
+    /// Leaves, flowers and fruit the grower placed itself.
     pub organs: Vec<Organ>,
 }
 
@@ -63,6 +74,7 @@ impl PlantSkeleton {
         }
     }
 
+    /// Node `i`, if there is one.
     #[must_use]
     pub fn node(&self, i: u32) -> Option<&Node> {
         self.nodes.get(usize_from(i))

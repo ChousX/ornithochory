@@ -13,6 +13,8 @@ use thiserror::Error;
 use crate::grow::{Envelope, Growth};
 use crate::species::{Form, Species, Structure, Tuft};
 
+/// One kind of value a design may vary; [`PlantLever::paths`] finds where
+/// it sits in a given species.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PlantLever {
     /// A [`Recursive`](crate::grow::Recursive) trunk's length, or a tuft's
@@ -55,7 +57,9 @@ pub enum PlantLever {
     TipRadius,
     /// Pipe-model exponent: 2 slender to 3 stout.
     PipeExponent,
+    /// A leaf's length, metres.
     LeafLength,
+    /// A leaf's width, metres.
     LeafWidth,
     /// How far leaves bend down from their stem, radians.
     LeafDroop,
@@ -67,6 +71,7 @@ pub enum PlantLever {
     LeafColor(u8),
     /// One sRGB channel of a cover.
     CoverColor(u8),
+    /// The bark's perceptual roughness, 0..1.
     BarkRoughness,
     /// The fraction of a cover that is dry.
     Dry,
@@ -80,10 +85,19 @@ pub enum PlantLever {
     Probability,
 }
 
+/// Why a lever can't turn a species.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LeverError {
+    /// The species has nothing for the lever to turn.
     #[error("{lever:?} doesn't apply to `{species}`, which {why}")]
-    DoesNotApply { lever: PlantLever, species: String, why: &'static str },
+    DoesNotApply {
+        /// The lever.
+        lever: PlantLever,
+        /// The species' name.
+        species: String,
+        /// What the species lacks, as the end of a sentence.
+        why: &'static str,
+    },
 }
 
 impl PlantLever {

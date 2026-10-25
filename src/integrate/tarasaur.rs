@@ -34,7 +34,10 @@ use crate::species::{Form, Species};
 /// What grows on the terrain.
 #[derive(Resource, Clone, Debug)]
 pub struct Flora {
+    /// Seeds every species' placement: the same seed grows the same plants
+    /// in the same places.
     pub world_seed: u64,
+    /// The species to grow, each with the chunk LODs it is placed on.
     pub entries: Vec<FloraEntry>,
     /// Ground rays per frame, across all chunks. A chunk is never split
     /// across frames, so one chunk may overshoot this.
@@ -58,6 +61,8 @@ impl Default for Flora {
 /// One species on the terrain.
 #[derive(Clone, Debug)]
 pub struct FloraEntry {
+    /// What grows: stemmed species become [`Plant`]s, cover species
+    /// [`CoverPatch`]es.
     pub species: Handle<Species>,
     /// The coarsest chunk LOD this species is placed on. Grass only on
     /// `High` chunks; trees down to `Medium`.

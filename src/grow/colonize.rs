@@ -20,9 +20,12 @@ use crate::num::{i32_from_f32, u32_from_usize, usize_from};
 use crate::random::PlantRng;
 use crate::skeleton::PlantSkeleton;
 
+/// How a space-colonized plant grows: its crown's shape and how hard its
+/// branches compete for the space in it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Colonize {
+    /// The crown's shape: attraction points fill it.
     pub envelope: Envelope,
     /// Attraction points scattered in the envelope.
     pub points: u32,
@@ -32,6 +35,7 @@ pub struct Colonize {
     pub kill: f32,
     /// Node spacing, metres.
     pub step: f32,
+    /// Growth stops after this many rounds, or once no node grew.
     pub max_iterations: u32,
     /// Added to every growth direction (+Y reaches up, -Y droops).
     pub tropism: Vec3,
@@ -68,11 +72,31 @@ impl Default for Colonize {
 /// The volume a crown fills.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum Envelope {
-    Ellipsoid { center: Vec3, radii: Vec3 },
+    /// A round crown: broadleaf trees and bushes.
+    Ellipsoid {
+        /// Plant space, metres.
+        center: Vec3,
+        /// Half-widths along x, y and z, metres.
+        radii: Vec3,
+    },
     /// Apex up, base at `base` metres high: conifers.
-    Cone { base: f32, height: f32, radius: f32 },
+    Cone {
+        /// Height of the widest point, metres.
+        base: f32,
+        /// From the base up to the apex, metres.
+        height: f32,
+        /// At the base, metres.
+        radius: f32,
+    },
     /// Wide at the top: vase-shaped shrubs, elms.
-    Vase { base: f32, height: f32, radius: f32 },
+    Vase {
+        /// Height of the narrow point, metres.
+        base: f32,
+        /// From the base up to the rim, metres.
+        height: f32,
+        /// At the rim, metres.
+        radius: f32,
+    },
 }
 
 impl Envelope {
@@ -156,6 +180,8 @@ impl Grid {
 }
 
 impl Colonize {
+    /// The skeleton for one variant, branch orders assigned and radii left
+    /// at 0.
     #[must_use]
     pub fn grow(&self, rng: &mut PlantRng) -> PlantSkeleton {
         let step = self.step.max(0.01);

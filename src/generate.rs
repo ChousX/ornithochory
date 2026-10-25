@@ -22,6 +22,7 @@ pub struct TierMeshes {
 /// Every tier of one variant, plus its bounding radius for tier selection.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GeneratedVariant {
+    /// Meshes per tier, in [`PlantLod::index`] order.
     pub tiers: [TierMeshes; 3],
     /// Distance from the plant's origin to its farthest point, metres.
     pub radius: f32,

@@ -20,6 +20,8 @@ use crate::num::{f32_from_u32, f32_from_usize, u32_from_f32, usize_from};
 use crate::random::PlantRng;
 use crate::skeleton::PlantSkeleton;
 
+/// A tree from Weber & Penn's tables: a trunk, and a [`Level`] for each
+/// generation of branches on it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Recursive {
@@ -76,6 +78,7 @@ pub struct Level {
     /// positive bends up. A sagging branch with an upturned tip is
     /// `curve: -30, curve_back: 40`.
     pub curve: f32,
+    /// Bend over the second half of each child, degrees; see `curve`.
     pub curve_back: f32,
     /// Random bend per step, radians.
     pub wander: f32,
@@ -124,6 +127,7 @@ pub enum Shape {
     Flame,
     /// From full at the base to half at the end.
     Tapered,
+    /// The same length all along.
     Constant,
 }
 
@@ -167,6 +171,7 @@ struct Shoot {
 }
 
 impl Recursive {
+    /// The skeleton for one variant, radii left at 0.
     #[must_use]
     pub fn grow(&self, rng: &mut PlantRng) -> PlantSkeleton {
         let mut skel = PlantSkeleton::rooted_at(Vec3::ZERO);

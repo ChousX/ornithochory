@@ -52,11 +52,16 @@ use crate::skeleton::{Organ, OrganKind, PlantSkeleton};
 /// Most arguments a module carries.
 pub const MAX_ARGS: usize = 4;
 
+/// A plant as an L-system: a start string, rules that rewrite it, and how
+/// the turtle reads the result (see the module docs for the symbols).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct LSystem {
+    /// The string before the first rewrite.
     pub axiom: String,
+    /// The rewriting rules; a module that matches none is copied.
     pub rules: Vec<Rule>,
+    /// How many times the string is rewritten.
     pub generations: u8,
     /// Derivation stops expanding past this many modules.
     pub max_modules: u32,
@@ -71,6 +76,8 @@ pub struct LSystem {
     /// Direction stems bend towards after each step (gravity: -Y,
     /// phototropism: +Y), and how strongly.
     pub tropism: Vec3,
+    /// Radians a step turns towards `tropism`, when the heading points
+    /// straight across it.
     pub tropism_strength: f32,
     /// Named constants every expression can use, so a species file can be
     /// tuned in one place.
@@ -102,6 +109,7 @@ impl Default for LSystem {
 /// same symbol by `weight`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Rule {
+    /// The module this rule rewrites.
     pub symbol: char,
     /// Names for the module's first arguments, usable in `when` and `to`.
     #[serde(default)]
@@ -109,7 +117,9 @@ pub struct Rule {
     /// Condition; empty is always true.
     #[serde(default)]
     pub when: String,
+    /// What the module becomes: modules whose arguments may use `params`.
     pub to: String,
+    /// How likely this rule is, against the other rules that match.
     #[serde(default = "default_weight")]
     pub weight: f32,
 }
@@ -127,6 +137,7 @@ const fn default_weight() -> f32 {
 /// One symbol of a derived string, with its arguments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Module {
+    /// What the module is: a turtle command or a variable.
     pub symbol: char,
     args: [f32; MAX_ARGS],
     count: u8,

@@ -30,15 +30,20 @@ pub const ATTRIBUTE_WIND: MeshVertexAttribute =
 /// size (see `crate::plant::PlantQuality`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PlantLod {
+    /// Full detail, for plants close up.
     #[default]
     Hero,
+    /// Fewer stem sides, twigs and leaves, for the middle distance.
     Near,
+    /// The fewest, for plants small on screen.
     Far,
 }
 
 impl PlantLod {
+    /// Every tier, finest first.
     pub const ALL: [Self; 3] = [Self::Hero, Self::Near, Self::Far];
 
+    /// The tier's place in [`Self::ALL`], and in per-tier arrays.
     #[must_use]
     pub const fn index(self) -> usize {
         match self {
@@ -96,8 +101,11 @@ impl PlantLod {
 /// Triangles under construction, in plant space.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshData {
+    /// Plant space, metres.
     pub positions: Vec<[f32; 3]>,
+    /// Unit, one per position.
     pub normals: Vec<[f32; 3]>,
+    /// Texture coordinates, one per position.
     pub uvs: Vec<[f32; 2]>,
     /// Linear RGBA tint; empty when the material carries the colour.
     pub colors: Vec<[f32; 4]>,
@@ -105,16 +113,20 @@ pub struct MeshData {
     /// unless [`MeshData::compute_tangents`] ran. Stems get them, so bark
     /// can be normal-mapped with an ordinary `StandardMaterial`.
     pub tangents: Vec<[f32; 4]>,
+    /// [`ATTRIBUTE_WIND`] weights, one per position.
     pub wind: Vec<[f32; 4]>,
+    /// Three per triangle, counter-clockwise seen from its front.
     pub indices: Vec<u32>,
 }
 
 impl MeshData {
+    /// No triangles: nothing to draw.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.indices.is_empty()
     }
 
+    /// Vertices so far, saturating at `u32::MAX`.
     #[must_use]
     pub fn vertex_count(&self) -> u32 {
         u32_from_usize(self.positions.len())
@@ -133,6 +145,8 @@ impl MeshData {
         i
     }
 
+    /// Adds a triangle over three vertices, counter-clockwise seen from its
+    /// front.
     pub fn triangle(&mut self, a: u32, b: u32, c: u32) {
         self.indices.extend([a, b, c]);
     }

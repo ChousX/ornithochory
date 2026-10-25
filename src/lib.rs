@@ -22,6 +22,8 @@
 //!
 //! Research behind the design: `docs/research/procedural-plants.md`.
 
+#![warn(missing_docs)]
+
 pub mod bend;
 #[cfg(feature = "genetics")]
 pub mod design;

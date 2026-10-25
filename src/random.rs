@@ -42,6 +42,7 @@ pub fn content_hash(bytes: &[u8]) -> u128 {
 pub struct PlantRng(u64);
 
 impl PlantRng {
+    /// A stream starting from `seed`.
     #[must_use]
     pub const fn new(seed: u64) -> Self {
         Self(seed)
@@ -54,6 +55,7 @@ impl PlantRng {
         Self(stable_hash(seed, label))
     }
 
+    /// The next 64 random bits.
     pub const fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;

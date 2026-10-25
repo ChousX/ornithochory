@@ -20,6 +20,7 @@ use crate::species::{Placement, Species};
 /// What the ground is like at a candidate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundHit {
+    /// Where the ground is, world space.
     pub pos: Vec3,
     /// Unit, out of the ground.
     pub normal: Vec3,
@@ -30,6 +31,7 @@ pub struct GroundHit {
 /// One plant to spawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placed {
+    /// The plant's root, rotation and scale.
     pub transform: Transform,
     /// Picks the variant and the per-plant tint.
     pub seed: u64,
