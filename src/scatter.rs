@@ -119,19 +119,19 @@ pub fn scatter(
 mod tests {
     use super::*;
 
-    #[allow(clippy::unnecessary_wraps)] // the shape `scatter` takes
-    fn flat(p: Vec2) -> Option<GroundHit> {
-        Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: Some(1) })
+    /// Level ground of material 1 everywhere.
+    fn flat() -> impl Fn(Vec2) -> Option<GroundHit> {
+        |p| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: Some(1) })
     }
 
     #[test]
     fn regions_tile_without_seams() {
         let pl = Placement { spacing: 1.3, probability: 0.8, ..Placement::default() };
-        let whole = scatter(&pl, 5, Vec2::ZERO, Vec2::splat(20.0), flat);
+        let whole = scatter(&pl, 5, Vec2::ZERO, Vec2::splat(20.0), flat());
         let mut parts = Vec::new();
         for (x, z) in [(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)] {
             let min = Vec2::new(x, z);
-            parts.extend(scatter(&pl, 5, min, min + 10.0, flat));
+            parts.extend(scatter(&pl, 5, min, min + 10.0, flat()));
         }
         let key = |p: &Placed| p.seed;
         let mut a: Vec<_> = whole.iter().map(key).collect();
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn rules_filter() {
         let pl = Placement { spacing: 1.0, probability: 1.0, materials: vec![2], ..Placement::default() };
-        assert_eq!(scatter(&pl, 1, Vec2::ZERO, Vec2::splat(5.0), flat).len(), 0);
+        assert_eq!(scatter(&pl, 1, Vec2::ZERO, Vec2::splat(5.0), flat()).len(), 0);
         let steep = |p: Vec2| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::new(1.0, 1.0, 0.0).normalize(), material: None });
         let pl = Placement { spacing: 1.0, probability: 1.0, slope: (0.0, 30.0), ..Placement::default() };
         assert_eq!(scatter(&pl, 1, Vec2::ZERO, Vec2::splat(5.0), steep).len(), 0);

@@ -147,11 +147,6 @@ struct Ball;
 #[derive(Resource)]
 struct CoverSpecies(Vec<Handle<Species>>);
 
-#[allow(clippy::unnecessary_wraps)] // the shape `scatter` takes
-const fn flat(p: Vec2) -> Option<GroundHit> {
-    Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: None })
-}
-
 fn setup(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -202,6 +197,7 @@ fn setup(
 /// as a terrain chunk would have, once their assets have loaded.
 fn scatter_cover(mut commands: Commands, cover: Option<Res<CoverSpecies>>, species: Res<Assets<Species>>) {
     let Some(cover) = cover else { return };
+    let flat = |p: Vec2| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: None });
     let Some(loaded) = cover.0.iter().map(|h| species.get(h).map(|s| (h, s))).collect::<Option<Vec<_>>>() else {
         return;
     };
