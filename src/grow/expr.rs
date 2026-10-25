@@ -15,7 +15,53 @@
 //! | `sqrt abs floor sin cos` | one argument; angles in radians |
 //! | `rand(lo, hi)` | uniform in `lo..hi`, from the plant's seeded RNG |
 
+use thiserror::Error;
+
 use crate::random::PlantRng;
+
+/// Why an expression didn't compile.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ExprError {
+    /// Something follows a complete expression, like the `2` in `1 2`.
+    #[error("unexpected '{found}' in \"{src}\"")]
+    Trailing {
+        /// The first character left over.
+        found: char,
+        /// The whole expression.
+        src: String,
+    },
+    /// The expression stops where an operand should come.
+    #[error("expression ends early")]
+    EndsEarly,
+    /// A `(` is never closed.
+    #[error("missing ')'")]
+    MissingParen,
+    /// Digits and dots that aren't a number, like `1.2.3`.
+    #[error("bad number \"{0}\"")]
+    BadNumber(String),
+    /// A character that can't start an operand.
+    #[error("unexpected '{0}'")]
+    Unexpected(char),
+    /// A name that is no variable, constant or function.
+    #[error("unknown name \"{0}\"")]
+    UnknownName(String),
+    /// A function named without its `(...)`.
+    #[error("{0} needs arguments")]
+    NoArguments(String),
+    /// A function's arguments that aren't separated by commas.
+    #[error("expected ',' or ')' in {0}(...)")]
+    ExpectedSeparator(String),
+    /// A function called with the wrong number of arguments.
+    #[error("{name} takes {expected} arguments, got {got}")]
+    ArgumentCount {
+        /// The function.
+        name: String,
+        /// How many it takes.
+        expected: usize,
+        /// How many it was given.
+        got: usize,
+    },
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Func {
@@ -88,14 +134,14 @@ impl Expr {
     ///
     /// # Errors
     ///
-    /// A message naming the problem: an unknown name, a wrong argument
-    /// count, or a syntax error.
-    pub fn parse(src: &str, names: &[&str]) -> Result<Self, String> {
+    /// The first problem found: an unknown name, a wrong argument count, or
+    /// a syntax error.
+    pub fn parse(src: &str, names: &[&str]) -> Result<Self, ExprError> {
         let mut p = Parser { chars: src.chars().collect(), pos: 0, names, out: Vec::new() };
         p.or()?;
         p.skip_ws();
-        if let Some(c) = p.peek() {
-            return Err(format!("unexpected '{c}' in \"{src}\""));
+        if let Some(found) = p.peek() {
+            return Err(ExprError::Trailing { found, src: src.into() });
         }
         Ok(Self(p.out))
     }
@@ -202,7 +248,7 @@ impl Parser<'_> {
         }
     }
 
-    fn or(&mut self) -> Result<(), String> {
+    fn or(&mut self) -> Result<(), ExprError> {
         self.and()?;
         while self.eat("||") {
             self.and()?;
@@ -211,7 +257,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn and(&mut self) -> Result<(), String> {
+    fn and(&mut self) -> Result<(), ExprError> {
         self.cmp()?;
         while self.eat("&&") {
             self.cmp()?;
@@ -220,7 +266,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn cmp(&mut self) -> Result<(), String> {
+    fn cmp(&mut self) -> Result<(), ExprError> {
         self.add()?;
         // Two-character operators first, so `<=` isn't read as `<`.
         for (token, op) in [("<=", Op::Le), (">=", Op::Ge), ("==", Op::Eq), ("!=", Op::Ne), ("<", Op::Lt), (">", Op::Gt)] {
@@ -233,7 +279,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn add(&mut self) -> Result<(), String> {
+    fn add(&mut self) -> Result<(), ExprError> {
         self.mul()?;
         loop {
             let op = if self.eat("+") {
@@ -248,7 +294,7 @@ impl Parser<'_> {
         }
     }
 
-    fn mul(&mut self) -> Result<(), String> {
+    fn mul(&mut self) -> Result<(), ExprError> {
         self.unary()?;
         loop {
             let op = if self.eat("*") {
@@ -263,7 +309,7 @@ impl Parser<'_> {
         }
     }
 
-    fn unary(&mut self) -> Result<(), String> {
+    fn unary(&mut self) -> Result<(), ExprError> {
         if self.eat("-") {
             self.unary()?;
             self.out.push(Op::Neg);
@@ -276,14 +322,14 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn primary(&mut self) -> Result<(), String> {
+    fn primary(&mut self) -> Result<(), ExprError> {
         self.skip_ws();
         let Some(c) = self.peek() else {
-            return Err("expression ends early".into());
+            return Err(ExprError::EndsEarly);
         };
         if self.eat("(") {
             self.or()?;
-            return if self.eat(")") { Ok(()) } else { Err("missing ')'".into()) };
+            return if self.eat(")") { Ok(()) } else { Err(ExprError::MissingParen) };
         }
         if c.is_ascii_digit() || c == '.' {
             let start = self.pos;
@@ -291,7 +337,7 @@ impl Parser<'_> {
                 self.bump();
             }
             let text: String = self.chars.iter().skip(start).take(self.pos.saturating_sub(start)).collect();
-            let v = text.parse::<f32>().map_err(|_| format!("bad number \"{text}\""))?;
+            let Ok(v) = text.parse::<f32>() else { return Err(ExprError::BadNumber(text)) };
             self.out.push(Op::Num(v));
             return Ok(());
         }
@@ -303,11 +349,11 @@ impl Parser<'_> {
             let name: String = self.chars.iter().skip(start).take(self.pos.saturating_sub(start)).collect();
             return self.name(&name);
         }
-        Err(format!("unexpected '{c}'"))
+        Err(ExprError::Unexpected(c))
     }
 
     /// A variable, constant or function call.
-    fn name(&mut self, name: &str) -> Result<(), String> {
+    fn name(&mut self, name: &str) -> Result<(), ExprError> {
         if let Some(i) = self.names.iter().position(|n| *n == name) {
             self.out.push(Op::Var(i));
             return Ok(());
@@ -317,10 +363,10 @@ impl Parser<'_> {
             return Ok(());
         }
         let Some(f) = Func::named(name) else {
-            return Err(format!("unknown name \"{name}\""));
+            return Err(ExprError::UnknownName(name.into()));
         };
         if !self.eat("(") {
-            return Err(format!("{name} needs arguments"));
+            return Err(ExprError::NoArguments(name.into()));
         }
         let mut count = 0usize;
         if !self.eat(")") {
@@ -331,12 +377,12 @@ impl Parser<'_> {
                     break;
                 }
                 if !self.eat(",") {
-                    return Err(format!("expected ',' or ')' in {name}(...)"));
+                    return Err(ExprError::ExpectedSeparator(name.into()));
                 }
             }
         }
         if count != f.arity() {
-            return Err(format!("{name} takes {} arguments, got {count}", f.arity()));
+            return Err(ExprError::ArgumentCount { name: name.into(), expected: f.arity(), got: count });
         }
         self.out.push(Op::Call(f));
         Ok(())
@@ -372,9 +418,19 @@ mod tests {
 
     #[test]
     fn errors_name_the_problem() {
-        assert!(Expr::parse("x + 1", &[]).unwrap_err().contains("\"x\""));
-        assert!(Expr::parse("min(1)", &[]).is_err());
-        assert!(Expr::parse("(1", &[]).is_err());
-        assert!(Expr::parse("1 2", &[]).is_err());
+        let err = |src: &str| Expr::parse(src, &["n"]).unwrap_err();
+        assert_eq!(err("x + 1"), ExprError::UnknownName("x".into()));
+        assert_eq!(err("min(1)"), ExprError::ArgumentCount { name: "min".into(), expected: 2, got: 1 });
+        assert_eq!(err("(1"), ExprError::MissingParen);
+        assert_eq!(err("1 2"), ExprError::Trailing { found: '2', src: "1 2".into() });
+        assert_eq!(err("n +"), ExprError::EndsEarly);
+        assert_eq!(err("1.2.3"), ExprError::BadNumber("1.2.3".into()));
+        assert_eq!(err("n + #"), ExprError::Unexpected('#'));
+        assert_eq!(err("sqrt"), ExprError::NoArguments("sqrt".into()));
+        assert_eq!(err("max(1 2)"), ExprError::ExpectedSeparator("max".into()));
+        // The messages read as they did when errors were strings.
+        assert_eq!(err("x + 1").to_string(), "unknown name \"x\"");
+        assert_eq!(err("1 2").to_string(), "unexpected '2' in \"1 2\"");
+        assert_eq!(err("min(1)").to_string(), "min takes 2 arguments, got 1");
     }
 }

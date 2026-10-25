@@ -43,14 +43,39 @@ use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::Envelope;
-use super::expr::Expr;
+use super::expr::{Expr, ExprError};
 use crate::random::PlantRng;
 use crate::skeleton::{Organ, OrganKind, PlantSkeleton};
 
 /// Most arguments a module carries.
 pub const MAX_ARGS: usize = 4;
+
+/// Why an L-system's axiom or rules don't parse.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LSystemError {
+    /// A module's argument list is never closed.
+    #[error("unclosed '(' after '{symbol}' in \"{src}\"")]
+    Unclosed {
+        /// The module.
+        symbol: char,
+        /// The axiom or rule it is in.
+        src: String,
+    },
+    /// A module has more than four arguments, the most one can carry.
+    #[error("'{symbol}' has more than {max} arguments in \"{src}\"", max = MAX_ARGS)]
+    TooManyArgs {
+        /// The module.
+        symbol: char,
+        /// The axiom or rule it is in.
+        src: String,
+    },
+    /// An argument or a rule's condition doesn't parse.
+    #[error(transparent)]
+    Expr(#[from] ExprError),
+}
 
 /// A plant as an L-system: a start string, rules that rewrite it, and how
 /// the turtle reads the result (see the module docs for the symbols).
@@ -181,7 +206,7 @@ struct Compiled {
 }
 
 /// Splits `src` into modules, compiling each argument against `names`.
-fn templates(src: &str, names: &[&str]) -> Result<Vec<Template>, String> {
+fn templates(src: &str, names: &[&str]) -> Result<Vec<Template>, LSystemError> {
     let chars: Vec<char> = src.chars().filter(|c| !c.is_whitespace()).collect();
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -195,7 +220,7 @@ fn templates(src: &str, names: &[&str]) -> Result<Vec<Template>, String> {
             i = i.saturating_add(1);
             loop {
                 let Some(&c) = chars.get(i) else {
-                    return Err(format!("unclosed '(' after '{symbol}' in \"{src}\""));
+                    return Err(LSystemError::Unclosed { symbol, src: src.into() });
                 };
                 i = i.saturating_add(1);
                 match c {
@@ -213,7 +238,7 @@ fn templates(src: &str, names: &[&str]) -> Result<Vec<Template>, String> {
             }
             args.push(Expr::parse(&arg, names)?);
             if args.len() > MAX_ARGS {
-                return Err(format!("'{symbol}' has more than {MAX_ARGS} arguments in \"{src}\""));
+                return Err(LSystemError::TooManyArgs { symbol, src: src.into() });
             }
         }
         out.push(Template { symbol, args });
@@ -222,7 +247,7 @@ fn templates(src: &str, names: &[&str]) -> Result<Vec<Template>, String> {
 }
 
 impl LSystem {
-    fn compile(&self) -> Result<Compiled, String> {
+    fn compile(&self) -> Result<Compiled, LSystemError> {
         let define_names: Vec<&str> = self.defines.keys().map(String::as_str).collect();
         let rules = self
             .rules
@@ -238,7 +263,7 @@ impl LSystem {
                     weight: r.weight.max(0.0),
                 })
             })
-            .collect::<Result<Vec<_>, String>>()?;
+            .collect::<Result<Vec<_>, LSystemError>>()?;
         Ok(Compiled { axiom: templates(&self.axiom, &define_names)?, rules, defines: self.defines.values().copied().collect() })
     }
 
@@ -246,8 +271,8 @@ impl LSystem {
     ///
     /// # Errors
     ///
-    /// The first problem found, as a message.
-    pub fn validate(&self) -> Result<(), String> {
+    /// The first problem found.
+    pub fn validate(&self) -> Result<(), LSystemError> {
         self.compile().map(|_| ())
     }
 
@@ -256,7 +281,7 @@ impl LSystem {
     /// # Errors
     ///
     /// When the axiom or a rule doesn't parse (see [`Self::validate`]).
-    pub fn derive(&self, rng: &mut PlantRng) -> Result<Vec<Module>, String> {
+    pub fn derive(&self, rng: &mut PlantRng) -> Result<Vec<Module>, LSystemError> {
         let c = self.compile()?;
         let mut env: Vec<f32> = Vec::new();
         let mut stack: Vec<f32> = Vec::new();
@@ -547,8 +572,18 @@ mod tests {
     #[test]
     fn bad_rules_are_reported() {
         let l = LSystem { axiom: "A(x)".into(), ..LSystem::default() };
-        assert!(l.validate().unwrap_err().contains("\"x\""));
+        assert_eq!(l.validate(), Err(LSystemError::Expr(ExprError::UnknownName("x".into()))));
         assert_eq!(l.grow(&mut PlantRng::new(0)).nodes.len(), 1);
+        let unclosed = LSystem { axiom: "F(1".into(), ..LSystem::default() };
+        assert_eq!(unclosed.validate(), Err(LSystemError::Unclosed { symbol: 'F', src: "F(1".into() }));
+        let crowded = LSystem { axiom: "F(1, 2, 3, 4, 5)".into(), ..LSystem::default() };
+        let err = crowded.validate().unwrap_err();
+        assert_eq!(err, LSystemError::TooManyArgs { symbol: 'F', src: "F(1, 2, 3, 4, 5)".into() });
+        assert_eq!(err.to_string(), "'F' has more than 4 arguments in \"F(1, 2, 3, 4, 5)\"");
+        // A rule's condition is checked too.
+        let rule = Rule { params: vec!["n".into()], when: "n >".into(), ..Rule::default() };
+        let when = LSystem { rules: vec![rule], ..LSystem::default() };
+        assert_eq!(when.validate(), Err(LSystemError::Expr(ExprError::EndsEarly)));
     }
 
     #[test]

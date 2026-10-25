@@ -18,7 +18,8 @@ mod lsystem;
 mod recursive;
 
 pub use colonize::{Colonize, Envelope};
-pub use lsystem::{LSystem, Module, Rule};
+pub use expr::ExprError;
+pub use lsystem::{LSystem, LSystemError, Module, Rule};
 pub use recursive::{Level, Recursive, Shape};
 
 use serde::{Deserialize, Serialize};
