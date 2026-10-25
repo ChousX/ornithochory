@@ -23,33 +23,44 @@ pub struct Node {
     /// Stem radius here, metres. Growers may leave 0 and call
     /// [`PlantSkeleton::pipe_radii`].
     pub radius: f32,
+    /// The node this one grows from; `None` only at the root.
     pub parent: Option<u32>,
     /// 0 = trunk (or main stem), 1 = its branches, ...
     pub order: u8,
 }
 
+/// What an [`Organ`] is. Only leaves are meshed so far.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OrganKind {
+    /// Meshed by [`crate::mesh::leaves`].
     #[default]
     Leaf,
+    /// A flower.
     Flower,
+    /// A fruit or seed head.
     Fruit,
 }
 
 /// Something hung on a node: a leaf, flower or fruit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Organ {
+    /// The node it hangs on.
     pub node: u32,
     /// Unit direction the organ points, from the node.
     pub dir: Vec3,
+    /// Leaf, flower or fruit.
     pub kind: OrganKind,
     /// Multiplies the species' organ size.
     pub scale: f32,
 }
 
+/// A grown plant before meshing: its stems as a tree of nodes, and the
+/// organs on them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlantSkeleton {
+    /// The root first; every parent before its children.
     pub nodes: Vec<Node>,
+    /// Leaves, flowers and fruit the grower placed itself.
     pub organs: Vec<Organ>,
 }
 
@@ -63,6 +74,7 @@ impl PlantSkeleton {
         }
     }
 
+    /// Node `i`, if there is one.
     #[must_use]
     pub fn node(&self, i: u32) -> Option<&Node> {
         self.nodes.get(usize_from(i))
@@ -182,7 +194,12 @@ impl PlantSkeleton {
     /// along one branch, starting at the node it grows from.
     #[must_use]
     pub fn chains(&self) -> Vec<Vec<u32>> {
-        let cont = self.continuations();
+        self.chains_along(&self.continuations())
+    }
+
+    /// The plant cut into axes like [`Self::chains`], each carrying on into
+    /// the child `cont` names for its last node (`None` ends it).
+    pub(crate) fn chains_along(&self, cont: &[Option<u32>]) -> Vec<Vec<u32>> {
         let follow = |start: Vec<u32>| {
             let mut chain = start;
             while let Some(next) = chain.last().and_then(|&l| cont.get(usize_from(l)).copied().flatten()) {
@@ -269,6 +286,22 @@ mod tests {
         // Every node except the shared fork node appears in exactly one chain.
         let total: usize = chains.iter().map(Vec::len).sum();
         assert_eq!(total, s.nodes.len() + 1);
+    }
+
+    #[test]
+    fn lengths_and_bounds_measure_the_stems() {
+        let mut s = fork();
+        let len = s.path_lengths();
+        assert!(len[0].abs() < 1e-6 && (len[2] - 2.0).abs() < 1e-6);
+        // Up the trunk, then out along the side branch.
+        let side = 2.0 + Vec2::new(0.5, 0.5).length() + Vec2::new(0.3, 0.3).length();
+        assert!((len[5] - side).abs() < 1e-5, "{}", len[5]);
+        s.pipe_radii(0.01, 2.0);
+        let (lo, hi) = s.bounds();
+        let r0 = s.nodes[0].radius;
+        assert!((lo.y + r0).abs() < 1e-6 && (lo.x + 0.8 + 0.01).abs() < 1e-6, "{lo}");
+        assert!((hi.y - 3.0 - 0.01).abs() < 1e-6, "{hi}");
+        assert_eq!(s.subtree_sizes(), [6, 5, 4, 1, 2, 1]);
     }
 
     #[test]

@@ -16,6 +16,8 @@ use crate::plant::{PlantCamera, PlantSet};
 /// include the head and tail, which mostly pass over the undergrowth.
 const BODY_PUSH: f32 = 0.6;
 
+/// Makes ornisculpt mobs bend plants and its `TierCamera`s pick plant
+/// tiers. Add it beside `OrnithochoryPlugin` and ornisculpt's own plugin.
 #[derive(Default)]
 pub struct OrnisculptPlantsPlugin;
 
@@ -28,11 +30,11 @@ impl Plugin for OrnisculptPlantsPlugin {
 }
 
 fn mob_bends(trigger: On<Add<Mob>>, mut commands: Commands) {
-    commands.entity(trigger.entity).insert(FoliageBender::default());
+    commands.entity(trigger.entity).try_insert(FoliageBender::default());
 }
 
 fn tier_camera_picks_plants(trigger: On<Add<TierCamera>>, mut commands: Commands) {
-    commands.entity(trigger.entity).insert(PlantCamera);
+    commands.entity(trigger.entity).try_insert(PlantCamera);
 }
 
 /// A bender as wide as its mob, once the mob's body exists.

@@ -20,9 +20,12 @@ use crate::num::{i32_from_f32, u32_from_usize, usize_from};
 use crate::random::PlantRng;
 use crate::skeleton::PlantSkeleton;
 
+/// How a space-colonized plant grows: its crown's shape and how hard its
+/// branches compete for the space in it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Colonize {
+    /// The crown's shape: attraction points fill it.
     pub envelope: Envelope,
     /// Attraction points scattered in the envelope.
     pub points: u32,
@@ -32,6 +35,7 @@ pub struct Colonize {
     pub kill: f32,
     /// Node spacing, metres.
     pub step: f32,
+    /// Growth stops after this many rounds, or once no node grew.
     pub max_iterations: u32,
     /// Added to every growth direction (+Y reaches up, -Y droops).
     pub tropism: Vec3,
@@ -68,11 +72,31 @@ impl Default for Colonize {
 /// The volume a crown fills.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum Envelope {
-    Ellipsoid { center: Vec3, radii: Vec3 },
+    /// A round crown: broadleaf trees and bushes.
+    Ellipsoid {
+        /// Plant space, metres.
+        center: Vec3,
+        /// Half-widths along x, y and z, metres.
+        radii: Vec3,
+    },
     /// Apex up, base at `base` metres high: conifers.
-    Cone { base: f32, height: f32, radius: f32 },
+    Cone {
+        /// Height of the widest point, metres.
+        base: f32,
+        /// From the base up to the apex, metres.
+        height: f32,
+        /// At the base, metres.
+        radius: f32,
+    },
     /// Wide at the top: vase-shaped shrubs, elms.
-    Vase { base: f32, height: f32, radius: f32 },
+    Vase {
+        /// Height of the narrow point, metres.
+        base: f32,
+        /// From the base up to the rim, metres.
+        height: f32,
+        /// At the rim, metres.
+        radius: f32,
+    },
 }
 
 impl Envelope {
@@ -109,7 +133,7 @@ impl Envelope {
 
     fn sample(self, rng: &mut PlantRng) -> Option<Vec3> {
         let (lo, hi) = self.bounds();
-        (0..64).find_map(|_| {
+        (0..SAMPLE_TRIES).find_map(|_| {
             let p = Vec3::new(rng.range(lo.x, hi.x), rng.range(lo.y, hi.y), rng.range(lo.z, hi.z));
             self.contains(p).then_some(p)
         })
@@ -155,24 +179,63 @@ impl Grid {
     }
 }
 
+/// The finest node spacing `step` can ask for, metres.
+const MIN_STEP: f32 = 0.01;
+/// A point reaches at least this many steps, so a node always has room to
+/// be pulled.
+const MIN_INFLUENCE_STEPS: f32 = 2.0;
+/// The trunk climbs at most this many times the steps up to the crown's
+/// foot...
+const CLIMB_SLACK: f32 = 2.0;
+/// ...plus this many, before it stops waiting for the crown to pull it.
+const CLIMB_EXTRA: f32 = 4.0;
+/// A node isn't grown closer than this many steps to an existing node.
+const MIN_NODE_GAP: f32 = 0.5;
+/// Rejection tries to find a point inside the envelope before that point
+/// is given up.
+const SAMPLE_TRIES: usize = 64;
+
+/// The distances growth works at, metres, made consistent: `step` is at
+/// least [`MIN_STEP`], `influence` at least [`MIN_INFLUENCE_STEPS`] steps,
+/// `kill` between the two.
+struct Reach {
+    step: f32,
+    influence: f32,
+    kill: f32,
+}
+
 impl Colonize {
+    /// The skeleton for one variant, branch orders assigned and radii left
+    /// at 0.
     #[must_use]
     pub fn grow(&self, rng: &mut PlantRng) -> PlantSkeleton {
-        let step = self.step.max(0.01);
-        let influence = self.influence.max(step * 2.0);
-        let kill = self.kill.clamp(step, influence);
+        let step = self.step.max(MIN_STEP);
+        let influence = self.influence.max(step * MIN_INFLUENCE_STEPS);
+        let reach = Reach { step, influence, kill: self.kill.clamp(step, influence) };
         let mut points: Vec<Vec3> = (0..self.points).filter_map(|_| self.envelope.sample(rng)).collect();
 
         let mut skel = PlantSkeleton::rooted_at(Vec3::ZERO);
         let mut grid = Grid { cell: influence, cells: HashMap::new() };
         grid.insert(0, Vec3::ZERO);
+        self.climb(&mut skel, &mut grid, &points, &reach, rng);
+        for _ in 0..self.max_iterations {
+            if points.is_empty() || !self.grow_once(&mut skel, &mut grid, &mut points, &reach) {
+                break;
+            }
+        }
+        smooth(&mut skel, self.smooth);
+        skel.assign_orders();
+        skel
+    }
 
-        // The trunk climbs towards the envelope until the crown can pull it.
+    /// The trunk climbs towards the envelope until the crown can pull it.
+    fn climb(&self, skel: &mut PlantSkeleton, grid: &mut Grid, points: &[Vec3], reach: &Reach, rng: &mut PlantRng) {
+        let step = reach.step;
         let foot = self.envelope.foot();
         let (mut tip, mut tip_pos) = (0u32, Vec3::ZERO);
-        let climb_limit = (foot.y / step).ceil().max(0.0).mul_add(2.0, 4.0);
+        let climb_limit = (foot.y / step).ceil().max(0.0).mul_add(CLIMB_SLACK, CLIMB_EXTRA);
         let mut climbed = 0.0;
-        while climbed < climb_limit && !points.iter().any(|p| p.distance(tip_pos) <= influence) {
+        while climbed < climb_limit && !points.iter().any(|p| p.distance(tip_pos) <= reach.influence) {
             let aim = (foot + Vec3::Y * step - tip_pos).normalize_or(Vec3::Y);
             let wander = Vec3::new(rng.signed(), 0.0, rng.signed()) * self.trunk_wander;
             tip_pos += (aim + wander).normalize_or(Vec3::Y) * step;
@@ -180,56 +243,50 @@ impl Colonize {
             grid.insert(tip, tip_pos);
             climbed += 1.0;
         }
+    }
 
-        let tropism = self.tropism;
-        for _ in 0..self.max_iterations {
-            if points.is_empty() {
-                break;
-            }
-            let mut pull = vec![Vec3::ZERO; skel.nodes.len()];
-            points.retain(|&p| match grid.nearest(p, &skel) {
-                Some((_, d)) if d <= kill => false,
-                Some((i, _)) => {
-                    if let (Some(acc), Some(n)) = (pull.get_mut(usize_from(i)), skel.node(i)) {
-                        *acc += (p - n.pos).normalize_or_zero();
-                    }
-                    true
+    /// One round of growth: every point pulls its nearest node, points
+    /// within `kill` of a node are used up, and every pulled node grows a
+    /// step towards its points. Whether any node grew.
+    fn grow_once(&self, skel: &mut PlantSkeleton, grid: &mut Grid, points: &mut Vec<Vec3>, reach: &Reach) -> bool {
+        let mut pull = vec![Vec3::ZERO; skel.nodes.len()];
+        points.retain(|&p| match grid.nearest(p, skel) {
+            Some((_, d)) if d <= reach.kill => false,
+            Some((i, _)) => {
+                if let (Some(acc), Some(n)) = (pull.get_mut(usize_from(i)), skel.node(i)) {
+                    *acc += (p - n.pos).normalize_or_zero();
                 }
-                None => true,
-            });
+                true
+            }
+            None => true,
+        });
 
-            let mut grew = false;
-            for (i, acc) in pull.into_iter().enumerate() {
-                if acc.length_squared() < 1e-8 {
-                    continue;
-                }
-                let i = u32_from_usize(i);
-                let Some(node) = skel.node(i) else { continue };
-                let from = node.pos;
-                let heading = node.parent.and_then(|p| skel.node(p)).map_or(Vec3::ZERO, |p| (from - p.pos).normalize_or_zero());
-                let dir = (acc.normalize() + heading * self.inertia + tropism).normalize_or_zero();
-                if dir == Vec3::ZERO {
-                    continue;
-                }
-                let pos = from + dir * step;
-                // A node pulled from both sides by points it can't reach
-                // would step back and forth into a knot of tiny twigs (and
-                // the pipe model would then thicken the whole limb under
-                // it). Don't grow onto an existing node.
-                if grid.nearest(pos, &skel).is_some_and(|(_, d)| d < step * 0.5) {
-                    continue;
-                }
-                let new = skel.push(i, pos, 0);
-                grid.insert(new, pos);
-                grew = true;
+        let mut grew = false;
+        for (i, acc) in pull.into_iter().enumerate() {
+            if acc.length_squared() < 1e-8 {
+                continue;
             }
-            if !grew {
-                break;
+            let i = u32_from_usize(i);
+            let Some(node) = skel.node(i) else { continue };
+            let from = node.pos;
+            let heading = node.parent.and_then(|p| skel.node(p)).map_or(Vec3::ZERO, |p| (from - p.pos).normalize_or_zero());
+            let dir = (acc.normalize() + heading * self.inertia + self.tropism).normalize_or_zero();
+            if dir == Vec3::ZERO {
+                continue;
             }
+            let pos = from + dir * reach.step;
+            // A node pulled from both sides by points it can't reach
+            // would step back and forth into a knot of tiny twigs (and
+            // the pipe model would then thicken the whole limb under
+            // it). Don't grow onto an existing node.
+            if grid.nearest(pos, skel).is_some_and(|(_, d)| d < reach.step * MIN_NODE_GAP) {
+                continue;
+            }
+            let new = skel.push(i, pos, 0);
+            grid.insert(new, pos);
+            grew = true;
         }
-        smooth(&mut skel, self.smooth);
-        skel.assign_orders();
-        skel
+        grew
     }
 }
 

@@ -52,11 +52,16 @@ use crate::skeleton::{Organ, OrganKind, PlantSkeleton};
 /// Most arguments a module carries.
 pub const MAX_ARGS: usize = 4;
 
+/// A plant as an L-system: a start string, rules that rewrite it, and how
+/// the turtle reads the result (see the module docs for the symbols).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct LSystem {
+    /// The string before the first rewrite.
     pub axiom: String,
+    /// The rewriting rules; a module that matches none is copied.
     pub rules: Vec<Rule>,
+    /// How many times the string is rewritten.
     pub generations: u8,
     /// Derivation stops expanding past this many modules.
     pub max_modules: u32,
@@ -71,6 +76,8 @@ pub struct LSystem {
     /// Direction stems bend towards after each step (gravity: -Y,
     /// phototropism: +Y), and how strongly.
     pub tropism: Vec3,
+    /// Radians a step turns towards `tropism`, when the heading points
+    /// straight across it.
     pub tropism_strength: f32,
     /// Named constants every expression can use, so a species file can be
     /// tuned in one place.
@@ -102,6 +109,7 @@ impl Default for LSystem {
 /// same symbol by `weight`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Rule {
+    /// The module this rule rewrites.
     pub symbol: char,
     /// Names for the module's first arguments, usable in `when` and `to`.
     #[serde(default)]
@@ -109,7 +117,9 @@ pub struct Rule {
     /// Condition; empty is always true.
     #[serde(default)]
     pub when: String,
+    /// What the module becomes: modules whose arguments may use `params`.
     pub to: String,
+    /// How likely this rule is, against the other rules that match.
     #[serde(default = "default_weight")]
     pub weight: f32,
 }
@@ -127,6 +137,7 @@ const fn default_weight() -> f32 {
 /// One symbol of a derived string, with its arguments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Module {
+    /// What the module is: a turtle command or a variable.
     pub symbol: char,
     args: [f32; MAX_ARGS],
     count: u8,
@@ -296,20 +307,6 @@ impl LSystem {
     }
 
     fn interpret(&self, modules: &[Module], rng: &mut PlantRng) -> PlantSkeleton {
-        #[derive(Clone, Copy)]
-        struct Turtle {
-            pos: Vec3,
-            rot: Quat,
-            node: u32,
-            order: u8,
-            step: f32,
-            /// Floor for the radius of new nodes (`#`).
-            width: f32,
-            tropism: f32,
-            /// Left the envelope: nothing more grows on this branch.
-            cut: bool,
-        }
-
         let mut skel = PlantSkeleton::rooted_at(Vec3::ZERO);
         let mut t = Turtle {
             pos: Vec3::ZERO,
@@ -332,31 +329,7 @@ impl LSystem {
                 Quat::from_axis_angle(axis, sign.mul_add(angle, rng.signed() * jitter))
             };
             match m.symbol {
-                'F' | 'f' => {
-                    if t.cut {
-                        continue;
-                    }
-                    let to = t.pos + t.rot * Vec3::Y * (t.step * a.unwrap_or(1.0));
-                    if self.envelope.is_some_and(|e| !e.contains(to)) {
-                        t.cut = true;
-                        continue;
-                    }
-                    t.pos = to;
-                    if m.symbol == 'F' {
-                        t.node = skel.push(t.node, t.pos, t.order);
-                        if let Some(n) = skel.nodes.last_mut() {
-                            n.radius = t.width;
-                        }
-                        // Bend the heading towards the tropism vector, in
-                        // proportion to how far it points away (ABOP 2.4).
-                        let h = t.rot * Vec3::Y;
-                        let axis = h.cross(tropism);
-                        let amount = axis.length() * t.tropism;
-                        if amount.abs() > 1e-6 {
-                            t.rot = Quat::from_axis_angle(axis.normalize(), amount) * t.rot;
-                        }
-                    }
-                }
+                'F' | 'f' => self.forward(&mut t, &mut skel, a.unwrap_or(1.0), m.symbol == 'F', tropism),
                 '+' => t.rot *= turn(Vec3::Z, 1.0, rng),
                 '-' => t.rot *= turn(Vec3::Z, -1.0, rng),
                 '&' => t.rot *= turn(Vec3::X, 1.0, rng),
@@ -389,6 +362,55 @@ impl LSystem {
         }
         skel
     }
+
+    /// Moves the turtle `steps` steps ahead, making a node if `grow` (`F`,
+    /// not `f`), unless that would leave the envelope: then the branch is
+    /// cut there.
+    fn forward(&self, t: &mut Turtle, skel: &mut PlantSkeleton, steps: f32, grow: bool, tropism: Vec3) {
+        if t.cut {
+            return;
+        }
+        let to = t.pos + t.rot * Vec3::Y * (t.step * steps);
+        if self.envelope.is_some_and(|e| !e.contains(to)) {
+            t.cut = true;
+            return;
+        }
+        t.pos = to;
+        if grow {
+            t.node = skel.push(t.node, t.pos, t.order);
+            if let Some(n) = skel.nodes.last_mut() {
+                n.radius = t.width;
+            }
+            // Bend the heading towards the tropism vector, in proportion to
+            // how far it points away (ABOP 2.4).
+            let h = t.rot * Vec3::Y;
+            let axis = h.cross(tropism);
+            let amount = axis.length() * t.tropism;
+            if amount.abs() > 1e-6 {
+                t.rot = Quat::from_axis_angle(axis.normalize(), amount) * t.rot;
+            }
+        }
+    }
+}
+
+/// The L-system's turtle: where it is, which way it heads, and the state
+/// `[` saves and `]` restores.
+#[derive(Clone, Copy)]
+struct Turtle {
+    pos: Vec3,
+    rot: Quat,
+    /// The last node made: the next one's parent.
+    node: u32,
+    /// Branch order: one more inside every `[`.
+    order: u8,
+    /// Length of one step, metres.
+    step: f32,
+    /// Floor for the radius of new nodes (`#`), metres.
+    width: f32,
+    /// Tropism strength (`~`).
+    tropism: f32,
+    /// Left the envelope: nothing more grows on this branch.
+    cut: bool,
 }
 
 /// The matching rule for `m`, if any: its symbol, enough arguments, a true

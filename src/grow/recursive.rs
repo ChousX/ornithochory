@@ -20,6 +20,8 @@ use crate::num::{f32_from_u32, f32_from_usize, u32_from_f32, usize_from};
 use crate::random::PlantRng;
 use crate::skeleton::PlantSkeleton;
 
+/// A tree from Weber & Penn's tables: a trunk, and a [`Level`] for each
+/// generation of branches on it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Recursive {
@@ -76,6 +78,7 @@ pub struct Level {
     /// positive bends up. A sagging branch with an upturned tip is
     /// `curve: -30, curve_back: 40`.
     pub curve: f32,
+    /// Bend over the second half of each child, degrees; see `curve`.
     pub curve_back: f32,
     /// Random bend per step, radians.
     pub wander: f32,
@@ -124,6 +127,7 @@ pub enum Shape {
     Flame,
     /// From full at the base to half at the end.
     Tapered,
+    /// The same length all along.
     Constant,
 }
 
@@ -147,6 +151,19 @@ impl Shape {
     }
 }
 
+/// The shortest trunk, metres.
+const MIN_HEIGHT: f32 = 0.1;
+/// The finest node spacing, metres, for the trunk and every level.
+const MIN_STEP: f32 = 0.02;
+/// A child's angle varies by up to this share of its level's `jitter`,
+/// either way.
+const ANGLE_JITTER: f32 = 0.25;
+/// A child's length varies by up to this share of its level's `jitter`,
+/// either way.
+const LENGTH_JITTER: f32 = 0.5;
+/// Children shorter than this many of their level's steps aren't grown.
+const MIN_CHILD_STEPS: f32 = 0.5;
+
 /// An axis waiting for its children: its nodes (the first is where it
 /// leaves its parent), its length, and its level.
 struct Axis {
@@ -167,12 +184,13 @@ struct Shoot {
 }
 
 impl Recursive {
+    /// The skeleton for one variant, radii left at 0.
     #[must_use]
     pub fn grow(&self, rng: &mut PlantRng) -> PlantSkeleton {
         let mut skel = PlantSkeleton::rooted_at(Vec3::ZERO);
         let trunk = Shoot {
             dir: Vec3::Y,
-            length: self.height.max(0.1),
+            length: self.height.max(MIN_HEIGHT),
             step: self.step,
             curve: 0.0,
             curve_back: 0.0,
@@ -228,12 +246,13 @@ fn children(skel: &PlantSkeleton, axis: &Axis, level: &Level, rng: &mut PlantRng
             let wrapped = (az - flank + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
             let az = wrapped.mul_add(flatten, flank);
             let spread = level.jitter * rng.signed();
-            let angle = (level.angle.1 - level.angle.0).mul_add(frac, level.angle.0) * spread.mul_add(0.25, 1.0);
+            let angle = (level.angle.1 - level.angle.0).mul_add(frac, level.angle.0) * spread.mul_add(ANGLE_JITTER, 1.0);
             let perp = side * az.cos() + up * az.sin();
             let (sin, cos) = angle.to_radians().sin_cos();
             let dir = (heading * cos + perp * sin).normalize_or(perp);
-            let length = axis.length * level.length * level.shape.ratio(frac) * level.jitter.mul_add(rng.signed() * 0.5, 1.0);
-            if length < level.step * 0.5 {
+            let length =
+                axis.length * level.length * level.shape.ratio(frac) * level.jitter.mul_add(rng.signed() * LENGTH_JITTER, 1.0);
+            if length < level.step * MIN_CHILD_STEPS {
                 continue;
             }
             out.push((
@@ -256,7 +275,7 @@ fn children(skel: &PlantSkeleton, axis: &Axis, level: &Level, rng: &mut PlantRng
 
 /// Grows `shoot` from node `from`; returns its nodes, `from` first.
 fn grow_axis(skel: &mut PlantSkeleton, from: u32, shoot: &Shoot, rng: &mut PlantRng) -> Vec<u32> {
-    let step = shoot.step.max(0.02);
+    let step = shoot.step.max(MIN_STEP);
     let segments = u32_from_f32((shoot.length / step).ceil()).max(1);
     let seg = shoot.length / f32_from_u32(segments);
     let half = segments.div_ceil(2);

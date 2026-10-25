@@ -40,6 +40,104 @@ const NORMAL_UP: f32 = 0.5;
 const NORMAL_ROUND: f32 = 0.4;
 /// How much of a dry blade's root keeps the green, 0..1.
 const DRY_ROOT_GREEN: f32 = 0.5;
+/// The fewest points around a cushion's rim, at any tier.
+const MIN_RIM_SIDES: u32 = 5;
+
+/// The most `height_jitter` can spread blade heights, so none reaches 0.
+const MAX_HEIGHT_JITTER: f32 = 0.95;
+/// Blade heights are drawn as `u^TALL_SKEW` of their spread: above 1, short
+/// blades are the common ones.
+const TALL_SKEW: f32 = 1.5;
+/// Blades at the clump's centre stand this many times `height`, before
+/// jitter...
+const CENTRE_HEIGHT: f32 = 1.08;
+/// ...and those at its rim this much less.
+const RIM_SHORTFALL: f32 = 0.2;
+/// How far a blade's bend turns from straight out of the clump, radians
+/// either way: mostly outwards, some across, a few back over the centre.
+const LEAN_YAW_SPREAD: f32 = 1.1;
+/// Dry blades bend over this many times as far as green ones.
+const DRY_DROOP: f32 = 1.3;
+/// Each blade bends over by `lean` times a draw from this range.
+const LEAN_JITTER: (f32, f32) = (0.5, 1.3);
+/// The furthest any blade bends over, as a fraction of its height.
+const MAX_LEAN: f32 = 0.75;
+/// Blades whose height draw is under this are single triangles...
+const SINGLE_TRIANGLE_BELOW: f32 = 0.3;
+/// ...and under this one segment short of the tallest.
+const FEWER_SEGMENTS_BELOW: f32 = 0.6;
+/// How brown a green blade can be, 0..1, drawn as `u^3` so most are green.
+const MAX_BROWNING: f32 = 0.35;
+/// Each blade's width is `width` times a draw from this range.
+const WIDTH_JITTER: (f32, f32) = (0.8, 1.2);
+/// The most a blade twists from root to tip, radians either way.
+const MAX_TWIST: f32 = 0.8;
+/// A bent blade's tip drops by this many times `lean` heights, so the
+/// blade keeps about its length.
+const TIP_DROP: f32 = 0.45;
+
+/// The waves around a mound's rim: (amplitude, as a fraction of `lobes`;
+/// waves around).
+const RIM_WAVES: [(f32, f32); 3] = [(0.5, 2.0), (0.35, 3.0), (0.25, 5.0)];
+/// Each wave's amplitude is its own times a draw from this range.
+const WAVE_JITTER: (f32, f32) = (0.6, 1.0);
+/// A rim never comes in nearer than this fraction of the mound's radius.
+const MIN_RIM: f32 = 0.4;
+/// The rim sits this many mound heights below the ground, so a cushion on
+/// a slope shows no gap.
+const RIM_SINK: f32 = 0.15;
+/// A mound's profile: `(1 - rho^FLAT_TOP)^SHOULDER` of its height at `rho`
+/// from the centre. Higher `FLAT_TOP`, a flatter top...
+const FLAT_TOP: f32 = 2.5;
+/// ...and lower `SHOULDER`, a steeper drop to the rim.
+const SHOULDER: f32 = 0.6;
+/// A cluster's outer mounds sit this far out, as a fraction of the
+/// cushion's radius.
+const LUMP_DISTANCE: (f32, f32) = (0.3, 0.6);
+/// Each mound's radius is the cushion's times a draw from this range...
+const LUMP_RADIUS: (f32, f32) = (0.45, 0.62);
+/// ...times `1 - LUMP_TAPER * distance`: outer mounds are smaller.
+const LUMP_TAPER: f32 = 0.35;
+/// Each mound's height is the cushion's times a draw from this range...
+const LUMP_HEIGHT: (f32, f32) = (0.65, 1.1);
+/// ...times `LUMP_PEAK - LUMP_SLOPE * distance`: the middle stands tallest.
+const LUMP_PEAK: f32 = 1.1;
+/// See [`LUMP_PEAK`].
+const LUMP_SLOPE: f32 = 0.5;
+/// A cluster's mounds have this share of the cushion's `lobes`.
+const LUMP_LOBES: f32 = 0.6;
+/// One mound standing in for a cluster reaches this share of each mound's
+/// radius past its centre...
+const STAND_IN_REACH: f32 = 0.8;
+/// ...and is this share as tall as the tallest.
+const STAND_IN_HEIGHT: f32 = 0.85;
+
+/// A cushion's colour runs from root to tip by `(height / top)^this`:
+/// above 1, the light only near the tops.
+const CUSHION_SHADE_SKEW: f32 = 1.5;
+/// A cushion's brightness jitters by this share of the cover's
+/// `color_jitter`.
+const CUSHION_JITTER: f32 = 0.6;
+/// The wind weight up the plant at a cushion's top (it barely sways).
+const CUSHION_SWAY: f32 = 0.2;
+
+/// Bristles stand within this fraction of the way out to the rim...
+const BRISTLE_SPAN: f32 = 0.92;
+/// ...rooted this many mound heights under the surface.
+const BRISTLE_ROOT_DEPTH: f32 = 0.12;
+/// How far a bristle wanders from leaning straight out, horizontally per
+/// unit of height.
+const BRISTLE_WANDER: f32 = 0.3;
+/// How far bristles at the rim lean out, per unit of height.
+const BRISTLE_SPLAY: f32 = 1.2;
+/// Each bristle's height is `bristle_height` times a draw from this range.
+const BRISTLE_HEIGHT_JITTER: (f32, f32) = (0.6, 1.4);
+/// A bristle's base is this many times its height across.
+const BRISTLE_WIDTH: f32 = 0.09;
+/// How far a bristle's normal turns to straight up, 0..1.
+const BRISTLE_NORMAL_UP: f32 = 0.7;
+/// A bristle's tip is this many times brighter than its base.
+const BRISTLE_TIP_LIGHT: f32 = 1.1;
 
 /// One tuft of `cover` at `lod`, centred on the origin, +Y up.
 #[must_use]
@@ -55,9 +153,9 @@ pub fn tuft(cover: &Cover, lod: PlantLod, seed: u64) -> MeshData {
         Tuft::Cushion { radius, height, sides, lumps, lobes, bristles, bristle_height } => {
             let mounds = cluster(radius, height, lumps, lobes, lod, &mut rng);
             let sides = match lod {
-                PlantLod::Hero => u32::from(sides.max(5)),
-                PlantLod::Near => u32::from(sides.max(5)).div_ceil(2).max(5),
-                PlantLod::Far => 5,
+                PlantLod::Hero => u32::from(sides).max(MIN_RIM_SIDES),
+                PlantLod::Near => u32::from(sides).max(MIN_RIM_SIDES).div_ceil(2).max(MIN_RIM_SIDES),
+                PlantLod::Far => MIN_RIM_SIDES,
             };
             let rings = rings(lod, mounds.len() > 1);
             let top = mounds.iter().map(|m| m.height).fold(1e-4, f32::max);
@@ -155,7 +253,7 @@ fn blades(out: &mut MeshData, c: &Clump, lod: PlantLod, paint: &Paint, rng: &mut
     let widen = (f32_from_u32(count) / f32_from_u32(keep.max(1))).sqrt();
     let segments = lod.segments(c.segments);
     let radius = c.height * c.spread;
-    let jitter = c.height_jitter.clamp(0.0, 0.95);
+    let jitter = c.height_jitter.clamp(0.0, MAX_HEIGHT_JITTER);
     for b in 0..keep {
         // Uniform over the clump's disc; blades lean out from its centre.
         let d = rng.unit().sqrt();
@@ -163,36 +261,36 @@ fn blades(out: &mut MeshData, c: &Clump, lod: PlantLod, paint: &Paint, rng: &mut
         let out_dir = Vec3::new(around.cos(), 0.0, around.sin());
         let at = out_dir * (radius * d);
         // Short blades are the common ones; the centre stands tallest.
-        let tall = rng.unit().powf(1.5);
-        let h = c.height * (1.5 * jitter).mul_add(tall, 1.0 - jitter) * d.mul_add(-0.2, 1.08);
+        let tall = rng.unit().powf(TALL_SKEW);
+        let h = c.height * (1.5 * jitter).mul_add(tall, 1.0 - jitter) * d.mul_add(-RIM_SHORTFALL, CENTRE_HEIGHT);
         let dry = rng.chance(paint.dry);
         // Mostly outwards, some across, a few back over the centre.
-        let yaw = rng.signed().mul_add(1.1, around);
+        let yaw = rng.signed().mul_add(LEAN_YAW_SPREAD, around);
         let lean_dir = Vec3::new(yaw.cos(), 0.0, yaw.sin());
-        let droop = if dry { 1.3 } else { 1.0 };
-        let lean = c.lean * rng.range(0.5, 1.3) * (h / c.height.max(1e-4)) * droop;
+        let droop = if dry { DRY_DROOP } else { 1.0 };
+        let lean = c.lean * rng.range(LEAN_JITTER.0, LEAN_JITTER.1) * (h / c.height.max(1e-4)) * droop;
         let tilt = Quat::from_axis_angle(out_dir.cross(Vec3::Y).normalize_or(Vec3::X), -c.splay * d);
         // Short blades need fewer segments to look curved; the shortest are
         // single triangles, a cheap dense understory under the tall ones.
-        let blade_segs = if tall < 0.3 {
+        let blade_segs = if tall < SINGLE_TRIANGLE_BELOW {
             1
-        } else if tall < 0.6 {
+        } else if tall < FEWER_SEGMENTS_BELOW {
             segments.saturating_sub(1).max(1)
         } else {
             segments
         };
         let k = rng.signed().mul_add(paint.jitter, 1.0);
         // Dry blades are straw; some green ones are starting to turn.
-        let browning = if dry { 1.0 } else { rng.unit().powi(3) * 0.35 };
-        let width = c.width * widen * rng.range(0.8, 1.2);
-        let twist = rng.signed() * 0.8;
+        let browning = if dry { 1.0 } else { rng.unit().powi(3) * MAX_BROWNING };
+        let width = c.width * widen * rng.range(WIDTH_JITTER.0, WIDTH_JITTER.1);
+        let twist = rng.signed() * MAX_TWIST;
         let blade_spec = Blade {
             at,
             axis: tilt * Vec3::Y,
             lean_dir,
             height: h,
             width,
-            lean: lean.min(0.75),
+            lean: lean.min(MAX_LEAN),
             twist,
             segments: blade_segs,
             phase: hash_unit(seed, u64::from(b)),
@@ -226,7 +324,7 @@ fn blade(out: &mut MeshData, b: &Blade, paint: &Paint) {
     // pulled over by `lean` and down to keep the length about the same.
     let p0 = b.at;
     let p1 = b.at + b.axis * b.height;
-    let p2 = b.at + b.axis * (b.height * b.lean.mul_add(-0.45, 1.0)) + b.lean_dir * (b.height * b.lean);
+    let p2 = b.at + b.axis * (b.height * b.lean.mul_add(-TIP_DROP, 1.0)) + b.lean_dir * (b.height * b.lean);
     let first = out.vertex_count();
     let segs = b.segments.max(1);
     let lit = |n: Vec3| n.normalize_or(Vec3::Y).lerp(Vec3::Y, NORMAL_UP);
@@ -270,16 +368,16 @@ struct Mound {
 
 impl Mound {
     fn new(centre: Vec2, radius: f32, height: f32, lobes: f32, rng: &mut PlantRng) -> Self {
-        let mut lobe =
-            |amp: f32, freq: f32| (amp * lobes * rng.range(0.6, 1.0), freq, rng.range(0.0, std::f32::consts::TAU));
-        let lobes = [lobe(0.5, 2.0), lobe(0.35, 3.0), lobe(0.25, 5.0)];
+        let lobes = RIM_WAVES.map(|(amp, freq)| {
+            (amp * lobes * rng.range(WAVE_JITTER.0, WAVE_JITTER.1), freq, rng.range(0.0, std::f32::consts::TAU))
+        });
         Self { centre, radius, height, lobes }
     }
 
     /// Rim radius at angle `a`.
     fn rim(&self, a: f32) -> f32 {
         let wobble: f32 = self.lobes.iter().map(|&(amp, f, ph)| amp * f.mul_add(a, ph).sin()).sum();
-        self.radius * (1.0 + wobble).max(0.4)
+        self.radius * (1.0 + wobble).max(MIN_RIM)
     }
 
     /// The surface point at `rho` (0 centre, 1 rim) and angle `a`. The rim
@@ -289,9 +387,9 @@ impl Mound {
         let flat = self.centre + Vec2::new(a.cos(), a.sin()) * (self.rim(a) * rho);
         // Flat-topped, then rounding steeply down to the rim.
         let y = if rho >= 1.0 {
-            -0.15 * self.height
+            -RIM_SINK * self.height
         } else {
-            (1.0 - rho.clamp(0.0, 1.0).powf(2.5)).max(0.0).powf(0.6) * self.height
+            (1.0 - rho.clamp(0.0, 1.0).powf(FLAT_TOP)).max(0.0).powf(SHOULDER) * self.height
         };
         Vec3::new(flat.x, y, flat.y)
     }
@@ -314,16 +412,16 @@ fn cluster(radius: f32, height: f32, lumps: u8, lobes: f32, lod: PlantLod, rng: 
                 return Mound::new(Vec2::ZERO, radius, height, lobes, rng);
             }
             let a = rng.range(0.0, std::f32::consts::TAU);
-            let d = if i == 0 { 0.0 } else { rng.range(0.3, 0.6) };
-            let r = radius * rng.range(0.45, 0.62) * d.mul_add(-0.35, 1.0);
-            let h = height * rng.range(0.65, 1.1) * d.mul_add(-0.5, 1.1);
-            Mound::new(Vec2::new(a.cos(), a.sin()) * (radius * d), r, h, lobes * 0.6, rng)
+            let d = if i == 0 { 0.0 } else { rng.range(LUMP_DISTANCE.0, LUMP_DISTANCE.1) };
+            let r = radius * rng.range(LUMP_RADIUS.0, LUMP_RADIUS.1) * d.mul_add(-LUMP_TAPER, 1.0);
+            let h = height * rng.range(LUMP_HEIGHT.0, LUMP_HEIGHT.1) * d.mul_add(-LUMP_SLOPE, LUMP_PEAK);
+            Mound::new(Vec2::new(a.cos(), a.sin()) * (radius * d), r, h, lobes * LUMP_LOBES, rng)
         })
         .collect();
     if kept <= 1 && lumps > 1 {
         // One mound standing in for the cluster: its footprint, its height.
-        let foot = all.iter().map(|m| m.radius.mul_add(0.8, m.centre.length())).fold(0.0, f32::max);
-        let h = all.iter().map(|m| m.height).fold(0.0, f32::max) * 0.85;
+        let foot = all.iter().map(|m| m.radius.mul_add(STAND_IN_REACH, m.centre.length())).fold(0.0, f32::max);
+        let h = all.iter().map(|m| m.height).fold(0.0, f32::max) * STAND_IN_HEIGHT;
         return vec![Mound::new(Vec2::ZERO, foot.min(radius), h, lobes, rng)];
     }
     all.into_iter().take(usize::from(kept.max(1))).collect()
@@ -345,10 +443,10 @@ fn cushion(out: &mut MeshData, m: &Mound, rings: &[f32], sides: u32, top: f32, p
     let add = |out: &mut MeshData, p: Vec3, rng: &mut PlantRng| {
         // Mound tops are lightest, hollows and the rim darkest: the shade a
         // mat of shoots casts on itself, which is most of moss's velvet.
-        let t = (p.y / top).clamp(0.0, 1.0).powf(1.5);
-        let k = rng.signed().mul_add(paint.jitter * 0.6, 1.0);
+        let t = (p.y / top).clamp(0.0, 1.0).powf(CUSHION_SHADE_SKEW);
+        let k = rng.signed().mul_add(paint.jitter * CUSHION_JITTER, 1.0);
         let uv = p.xz() * paint.uv_per_m;
-        out.vertex(p, Vec3::Y, uv, Vec4::new(t * 0.2, 1.0, 0.0, 0.0), Some(paint.at(t, 0.0, k)))
+        out.vertex(p, Vec3::Y, uv, Vec4::new(t * CUSHION_SWAY, 1.0, 0.0, 0.0), Some(paint.at(t, 0.0, k)))
     };
     let ring_count = u32::try_from(rings.len()).unwrap_or(0);
     for &rho in rings {
@@ -401,24 +499,24 @@ fn smooth_normals(out: &mut MeshData, first: u32) {
 /// One shoot standing out of the cushion: a single thin triangle, leaning
 /// out with the surface.
 fn bristle(out: &mut MeshData, m: &Mound, height: f32, top: f32, paint: &Paint, rng: &mut PlantRng, phase: f32) {
-    let rho = rng.unit().sqrt() * 0.92;
+    let rho = rng.unit().sqrt() * BRISTLE_SPAN;
     let a = rng.range(0.0, std::f32::consts::TAU);
-    let root = m.point(rho, a) - Vec3::Y * (m.height * 0.12);
+    let root = m.point(rho, a) - Vec3::Y * (m.height * BRISTLE_ROOT_DEPTH);
     let out_dir = Vec3::new(a.cos(), 0.0, a.sin());
-    let wander = Vec3::new(rng.signed(), 0.0, rng.signed()) * 0.3;
-    let up = (Vec3::Y + out_dir * (rho * rho * 1.2) + wander).normalize_or(Vec3::Y);
-    let h = height * rng.range(0.6, 1.4);
+    let wander = Vec3::new(rng.signed(), 0.0, rng.signed()) * BRISTLE_WANDER;
+    let up = (Vec3::Y + out_dir * (rho * rho * BRISTLE_SPLAY) + wander).normalize_or(Vec3::Y);
+    let h = height * rng.range(BRISTLE_HEIGHT_JITTER.0, BRISTLE_HEIGHT_JITTER.1);
     let side = Vec3::new(rng.signed(), 0.0, rng.signed());
-    let across = up.cross(side).normalize_or(Vec3::X) * (h * 0.09);
+    let across = up.cross(side).normalize_or(Vec3::X) * (h * BRISTLE_WIDTH);
     let dry = if rng.chance(paint.dry) { 1.0 } else { 0.0 };
     let k = rng.signed().mul_add(paint.jitter, 1.0);
     let t0 = (root.y / top.max(1e-4)).clamp(0.0, 1.0);
-    let normal = up.cross(across).normalize_or(Vec3::Y).lerp(Vec3::Y, 0.7);
-    let wind = Vec4::new(0.2, 1.0, phase, 1.0);
+    let normal = up.cross(across).normalize_or(Vec3::Y).lerp(Vec3::Y, BRISTLE_NORMAL_UP);
+    let wind = Vec4::new(CUSHION_SWAY, 1.0, phase, 1.0);
     let uv = root.xz() * paint.uv_per_m;
     let a0 = out.vertex(root - across, normal, uv, wind, Some(paint.at(t0, dry, k)));
     let a1 = out.vertex(root + across, normal, uv, wind, Some(paint.at(t0, dry, k)));
-    let tip = out.vertex(root + up * h, normal, uv, wind, Some(paint.at(1.0, dry, k * 1.1)));
+    let tip = out.vertex(root + up * h, normal, uv, wind, Some(paint.at(1.0, dry, k * BRISTLE_TIP_LIGHT)));
     out.triangle(a0, a1, tip);
 }
 
@@ -426,6 +524,22 @@ fn bristle(out: &mut MeshData, m: &Mound, height: f32, top: f32, paint: &Paint, 
 const DETAIL_TEXELS: u32 = 128;
 /// Speckles (shoot tips) across it.
 const DETAIL_CELLS: u32 = 16;
+/// A shoot tip's spot fades to the floor this far from its centre, in
+/// cells...
+const SPOT_RADIUS: f32 = 0.8;
+/// ...as `(1 - d / SPOT_RADIUS)^SPOT_FALLOFF`: under 1, a soft round spot
+/// with a firm edge.
+const SPOT_FALLOFF: f32 = 0.8;
+/// The dimmest shoot tip's brightness; the brightest is 1.
+const MIN_TIP_BRIGHTNESS: f32 = 0.5;
+/// Mixed into the seed (by xor) for the hash of each tip's second jitter
+/// axis, apart from its first.
+const JITTER_Y_SALT: u64 = 0x5eed;
+/// Mixed into the seed (by xor) for the hash of each tip's brightness.
+const BRIGHTNESS_SALT: u64 = 0xb417;
+/// Anisotropic filtering samples, so the speckle stays sharp at grazing
+/// angles.
+const DETAIL_ANISOTROPY: u16 = 4;
 
 /// A tiling speckle of shoot tips for a cover's material, with `strength`
 /// contrast (0..1), and its mean brightness.
@@ -436,12 +550,39 @@ const DETAIL_CELLS: u32 = 16;
 /// shimmer, with distance.
 #[must_use]
 pub fn detail_texture(strength: f32, seed: u64) -> (Image, f32) {
+    let levels = mip_chain(speckle(strength, seed));
+    let mean = levels.last().and_then(|l| l.first()).copied().unwrap_or(1.0);
+    let bytes: Vec<u8> = levels
+        .iter()
+        .flatten()
+        .flat_map(|&v| {
+            let g = u8::try_from(u32_from_f32((v.clamp(0.0, 1.0) * 255.0).round())).unwrap_or(u8::MAX);
+            [g, g, g, u8::MAX]
+        })
+        .collect();
+    let size = Extent3d { width: DETAIL_TEXELS, height: DETAIL_TEXELS, depth_or_array_layers: 1 };
+    let mut image = Image::new_uninit(size, TextureDimension::D2, TextureFormat::Rgba8Unorm, RenderAssetUsages::RENDER_WORLD);
+    image.texture_descriptor.mip_level_count = u32::try_from(levels.len()).unwrap_or(1);
+    image.data = Some(bytes);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        anisotropy_clamp: DETAIL_ANISOTROPY,
+        ..ImageSamplerDescriptor::linear()
+    });
+    (image, mean)
+}
+
+/// The speckle at full size: [`DETAIL_TEXELS`] rows of as many
+/// brightnesses, `1 - strength` between the tips.
+fn speckle(strength: f32, seed: u64) -> Vec<f32> {
     let floor = 1.0 - strength.clamp(0.0, 1.0);
     let cells = DETAIL_CELLS;
     let texel = f32_from_u32(cells) / f32_from_u32(DETAIL_TEXELS);
     let point = |cx: u32, cy: u32| {
         let i = u64::from(cy.wrapping_mul(cells).wrapping_add(cx));
-        (Vec2::new(hash_unit(seed, i), hash_unit(seed ^ 0x5eed, i)), hash_unit(seed ^ 0xb417, i).mul_add(0.5, 0.5))
+        let jitter = Vec2::new(hash_unit(seed, i), hash_unit(seed ^ JITTER_Y_SALT, i));
+        (jitter, hash_unit(seed ^ BRIGHTNESS_SALT, i).mul_add(1.0 - MIN_TIP_BRIGHTNESS, MIN_TIP_BRIGHTNESS))
     };
     let mut level: Vec<f32> = Vec::with_capacity(usize_from(DETAIL_TEXELS.wrapping_mul(DETAIL_TEXELS)));
     for y in 0..DETAIL_TEXELS {
@@ -462,10 +603,16 @@ pub fn detail_texture(strength: f32, seed: u64) -> (Image, f32) {
                     }
                 }
             }
-            let spot = (1.0 - best.0 / 0.8).max(0.0).powf(0.8) * best.1;
+            let spot = (1.0 - best.0 / SPOT_RADIUS).max(0.0).powf(SPOT_FALLOFF) * best.1;
             level.push((1.0 - floor).mul_add(spot, floor));
         }
     }
+    level
+}
+
+/// `level` ([`DETAIL_TEXELS`] across) and every mip under it, each the
+/// mean of four texels of the one above, down to a single texel.
+fn mip_chain(level: Vec<f32>) -> Vec<Vec<f32>> {
     let mut levels = vec![level];
     let mut size = DETAIL_TEXELS;
     while size > 1 {
@@ -481,26 +628,7 @@ pub fn detail_texture(strength: f32, seed: u64) -> (Image, f32) {
         levels.push(next);
         size = half;
     }
-    let mean = levels.last().and_then(|l| l.first()).copied().unwrap_or(1.0);
-    let bytes: Vec<u8> = levels
-        .iter()
-        .flatten()
-        .flat_map(|&v| {
-            let g = u8::try_from(u32_from_f32((v.clamp(0.0, 1.0) * 255.0).round())).unwrap_or(u8::MAX);
-            [g, g, g, u8::MAX]
-        })
-        .collect();
-    let size = Extent3d { width: DETAIL_TEXELS, height: DETAIL_TEXELS, depth_or_array_layers: 1 };
-    let mut image = Image::new_uninit(size, TextureDimension::D2, TextureFormat::Rgba8Unorm, RenderAssetUsages::RENDER_WORLD);
-    image.texture_descriptor.mip_level_count = u32::try_from(levels.len()).unwrap_or(1);
-    image.data = Some(bytes);
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        anisotropy_clamp: 4,
-        ..ImageSamplerDescriptor::linear()
-    });
-    (image, mean)
+    levels
 }
 
 #[cfg(test)]
@@ -578,6 +706,19 @@ mod tests {
         let texels: u32 = (0..image.texture_descriptor.mip_level_count).map(|l| (DETAIL_TEXELS >> l).pow(2)).sum();
         assert_eq!(image.data.as_ref().map(Vec::len), Some(usize_from(texels) * 4));
         assert!(mean > 0.4 && mean < 1.0, "{mean}");
+    }
+
+    #[test]
+    fn mips_average_down_to_one_texel() {
+        // A checkerboard: every mip under the top is mid-grey.
+        let n = DETAIL_TEXELS;
+        let level = (0..n * n).map(|i| if (i % n + i / n) % 2 == 0 { 1.0 } else { 0.0 }).collect();
+        let levels = mip_chain(level);
+        assert_eq!(levels.len(), 8);
+        assert_eq!(levels.last().map(Vec::len), Some(1));
+        for mip in levels.iter().skip(1) {
+            assert!(mip.iter().all(|v| (v - 0.5).abs() < 1e-6));
+        }
     }
 
     #[test]

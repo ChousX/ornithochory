@@ -22,6 +22,7 @@ pub struct TierMeshes {
 /// Every tier of one variant, plus its bounding radius for tier selection.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GeneratedVariant {
+    /// Meshes per tier, in [`PlantLod::index`] order.
     pub tiers: [TierMeshes; 3],
     /// Distance from the plant's origin to its farthest point, metres.
     pub radius: f32,
@@ -57,6 +58,10 @@ pub fn mesh_structure(skel: &PlantSkeleton, s: &Structure, seed: u64, lod: Plant
     }
 }
 
+/// How far leaves reach past the stems, in leaf lengths, for the bounding
+/// radius: a leaf at its longest, with room to spare.
+const LEAF_REACH: f32 = 1.5;
+
 /// Every tier of one variant of `species`.
 #[must_use]
 pub fn generate(species: &Species, variant: u8) -> GeneratedVariant {
@@ -65,7 +70,7 @@ pub fn generate(species: &Species, variant: u8) -> GeneratedVariant {
         Form::Structure(s) => {
             let skel = build_structure(s, seed);
             let (lo, hi) = skel.bounds();
-            let leaf = s.leaves.as_ref().map_or(0.0, |l| l.length * 1.5);
+            let leaf = s.leaves.as_ref().map_or(0.0, |l| l.length * LEAF_REACH);
             GeneratedVariant {
                 tiers: PlantLod::ALL.map(|lod| mesh_structure(&skel, s, seed, lod)),
                 radius: lo.abs().max(hi.abs()).length() + leaf,
@@ -73,9 +78,9 @@ pub fn generate(species: &Species, variant: u8) -> GeneratedVariant {
         }
         Form::Cover(c) => {
             let tiers = PlantLod::ALL.map(|lod| TierMeshes { stems: MeshData::default(), foliage: cover::tuft(c, lod, seed) });
-            let radius = tiers
-                .first()
-                .map_or(0.1, |t| t.foliage.positions.iter().map(|&p| bevy::math::Vec3::from(p).length()).fold(0.0, f32::max));
+            // Sized by the hero tuft, the most detailed.
+            let [hero, ..] = &tiers;
+            let radius = hero.foliage.positions.iter().map(|&p| bevy::math::Vec3::from(p).length()).fold(0.0, f32::max);
             GeneratedVariant { tiers, radius }
         }
     }

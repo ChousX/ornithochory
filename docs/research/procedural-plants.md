@@ -348,10 +348,10 @@ the reference for its cover renderer.
 ## 7. What this means for Ornithochory
 
 1. **One intermediate form.** Every structural grower (L-system, space
-   colonization, later Weber-Penn and self-organizing) emits a
-   `PlantSkeleton`: nodes with position, radius, parent, order. Pipe-model
-   radii, phyllotaxis, the tube mesher, leaves, wind weights and LOD all work
-   on that, so a new grower is one trait impl.
+   colonization and Weber-Penn recursion now, self-organizing later) emits
+   a `PlantSkeleton`: nodes with position, radius, parent, order.
+   Pipe-model radii, phyllotaxis, the tube mesher, leaves, wind weights and
+   LOD all work on that, so a new grower is one function.
 2. **Cover is a species too**, with a density rule and per-distance
    representations (tufts, shells, material), so grass, moss and lichen use
    the same placement as trees.

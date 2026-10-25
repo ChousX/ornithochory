@@ -12,6 +12,18 @@ use xxhash_rust::xxh3::{xxh3_64_with_seed, xxh3_128};
 
 use crate::num::{u64_from_i64_bits, unit_f32_from_u64};
 
+/// `SplitMix64`'s step between states: the golden ratio as 64 fixed-point
+/// bits.
+const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+/// `SplitMix64`'s two output multipliers (Stafford's Mix13).
+const MIX: (u64, u64) = (0xBF58_476D_1CE4_E5B9, 0x94D0_49BB_1331_11EB);
+/// Spreads [`hash_unit`]'s lanes over the hash's bits, so neighbouring
+/// lanes draw unrelated values.
+const LANE_SPREAD: u64 = 0xD6E8_FEB8_6659_FD93;
+/// Rejection tries for a point in the unit ball before giving up on 0.
+/// Each succeeds about half the time, so 32 failing is a 1-in-10^10 event.
+const BALL_TRIES: usize = 32;
+
 /// Stable 64-bit hash of `label` under `seed`.
 #[must_use]
 pub fn stable_hash(seed: u64, label: &str) -> u64 {
@@ -42,6 +54,7 @@ pub fn content_hash(bytes: &[u8]) -> u128 {
 pub struct PlantRng(u64);
 
 impl PlantRng {
+    /// A stream starting from `seed`.
     #[must_use]
     pub const fn new(seed: u64) -> Self {
         Self(seed)
@@ -54,11 +67,12 @@ impl PlantRng {
         Self(stable_hash(seed, label))
     }
 
+    /// The next 64 random bits.
     pub const fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        self.0 = self.0.wrapping_add(GOLDEN_GAMMA);
         let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z = (z ^ (z >> 30)).wrapping_mul(MIX.0);
+        z = (z ^ (z >> 27)).wrapping_mul(MIX.1);
         z ^ (z >> 31)
     }
 
@@ -84,7 +98,7 @@ impl PlantRng {
 
     /// Uniform inside the unit ball (rejection; 52% acceptance).
     pub fn in_unit_ball(&mut self) -> Vec3 {
-        for _ in 0..32 {
+        for _ in 0..BALL_TRIES {
             let v = Vec3::new(self.signed(), self.signed(), self.signed());
             if v.length_squared() <= 1.0 {
                 return v;
@@ -98,7 +112,7 @@ impl PlantRng {
 /// hash without an RNG: `hash_unit(h, 0)`, `hash_unit(h, 1)`.
 #[must_use]
 pub const fn hash_unit(hash: u64, lane: u64) -> f32 {
-    PlantRng::new(hash ^ lane.wrapping_mul(0xD6E8_FEB8_6659_FD93)).unit()
+    PlantRng::new(hash ^ lane.wrapping_mul(LANE_SPREAD)).unit()
 }
 
 #[cfg(test)]
@@ -120,6 +134,24 @@ mod tests {
             let u = rng.unit();
             assert!((0.0..1.0).contains(&u));
         }
+    }
+
+    #[test]
+    fn lanes_are_stable_and_apart() {
+        let h = cell_hash(3, IVec2::new(4, -2));
+        assert!((hash_unit(h, 0) - hash_unit(h, 0)).abs() < f32::EPSILON);
+        assert!((hash_unit(h, 0) - hash_unit(h, 1)).abs() > f32::EPSILON);
+        assert!((0.0..1.0).contains(&hash_unit(h, 7)));
+    }
+
+    #[test]
+    fn ball_points_stay_inside() {
+        let mut rng = PlantRng::new(2);
+        for _ in 0..1000 {
+            assert!(rng.in_unit_ball().length_squared() <= 1.0);
+        }
+        let r = rng.range(2.0, 3.0);
+        assert!((2.0..3.0).contains(&r));
     }
 
     #[test]

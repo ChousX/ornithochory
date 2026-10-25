@@ -27,24 +27,47 @@ use crate::species::{Form, Species, Tuft};
 pub enum PlantTrait {
     /// Every value `lever` reaches varies within `range`, which must lie
     /// inside [`PlantLever::range`] and hold the value as designed.
-    Lever { lever: PlantLever, range: (f32, f32) },
+    Lever {
+        /// The values that vary.
+        lever: PlantLever,
+        /// Lowest and highest value they may take, in the lever's units.
+        range: (f32, f32),
+    },
     /// Any value of the species by its genome path.
     Field(Trait),
 }
 
-/// A plant as a player designed it: the species, and what may vary.
+/// A plant as someone designed it: the species, and what may vary.
 #[derive(Asset, TypePath, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct PlantDesign {
+    /// The species as designed: every strain's founder.
     pub species: Species,
+    /// The values of `species` that may vary from strain to strain.
     pub traits: Vec<PlantTrait>,
 }
 
+/// Why a design can't become a genome.
 #[derive(Debug, Error)]
 pub enum DesignError {
+    /// A lever doesn't apply to the species.
     #[error(transparent)]
     Lever(#[from] LeverError),
+    /// A lever's range lies outside the values the lever may take.
     #[error("{lever:?}: range {lo}..={hi} is not inside {min}..={max}")]
-    Range { lever: PlantLever, lo: f32, hi: f32, min: f32, max: f32 },
+    Range {
+        /// The lever.
+        lever: PlantLever,
+        /// The design's lowest value.
+        lo: f32,
+        /// The design's highest value.
+        hi: f32,
+        /// The lowest value the lever may take ([`PlantLever::range`]).
+        min: f32,
+        /// The highest value the lever may take.
+        max: f32,
+    },
+    /// The genome couldn't encode or decode the species: a trait's range
+    /// doesn't hold the designed value, or a mutant is unviable.
     #[error(transparent)]
     Genetics(#[from] genetics::Error),
 }
@@ -54,7 +77,9 @@ pub enum DesignError {
 /// mounds and bristles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Complexity {
+    /// Stem nodes, or a cushion's mounds.
     pub nodes: usize,
+    /// Leaves, flowers and fruit, or a cover's blades or bristles.
     pub organs: usize,
 }
 
@@ -147,14 +172,23 @@ struct DesignFile {
 #[derive(Default, TypePath)]
 pub struct PlantDesignLoader;
 
+/// Why a `*.plant-design.ron` file didn't load.
 #[derive(Debug, Error)]
 pub enum PlantDesignLoaderError {
+    /// The file couldn't be read.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The file isn't a valid design.
     #[error(transparent)]
     Ron(#[from] ron::error::SpannedError),
+    /// The species it names didn't load.
     #[error("loading `{path}`: {reason}")]
-    Species { path: String, reason: String },
+    Species {
+        /// The species' asset path, as the design names it.
+        path: String,
+        /// Why it didn't load.
+        reason: String,
+    },
 }
 
 impl AssetLoader for PlantDesignLoader {
@@ -180,7 +214,9 @@ impl AssetLoader for PlantDesignLoader {
     }
 }
 
-/// Registers [`PlantDesign`] assets and their loader.
+/// Registers [`PlantDesign`] assets and their loader. Added by
+/// [`crate::OrnithochoryPlugin`].
+#[derive(Default)]
 pub struct PlantDesignPlugin;
 
 impl Plugin for PlantDesignPlugin {

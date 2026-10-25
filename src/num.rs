@@ -76,3 +76,36 @@ pub fn u32_from_usize(v: usize) -> u32 {
 pub const fn u64_from_i64_bits(v: i64) -> u64 {
     v as u64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn float_to_int_saturates() {
+        assert_eq!(i32_from_f32(-2.7), -2);
+        assert_eq!(i32_from_f32(f32::MAX), i32::MAX);
+        assert_eq!(i32_from_f32(f32::NAN), 0);
+        assert_eq!(u32_from_f32(-5.0), 0);
+        assert_eq!(u32_from_f32(1e20), u32::MAX);
+        assert_eq!(u32_from_usize(usize::MAX), u32::MAX);
+        assert_eq!(u32_from_usize(7), 7);
+    }
+
+    #[test]
+    fn unit_floats_stay_below_one() {
+        assert!(unit_f32_from_u64(0).abs() < f32::EPSILON);
+        assert!(unit_f32_from_u64(u64::MAX) < 1.0);
+        assert!(unit_f32_from_u64(u64::MAX) > 0.999_999);
+    }
+
+    #[test]
+    fn bits_round_trip() {
+        assert_eq!(u64_from_i64_bits(-1), u64::MAX);
+        assert_eq!(u64_from_i64_bits(5), 5);
+        assert_eq!(usize_from(u32::MAX), 4_294_967_295);
+        assert!((f32_from_u32(16_777_216) - 16_777_216.0).abs() < f32::EPSILON);
+        assert!((f32_from_i32(-3) + 3.0).abs() < f32::EPSILON);
+        assert!((f32_from_usize(12) - 12.0).abs() < f32::EPSILON);
+    }
+}

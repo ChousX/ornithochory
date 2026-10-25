@@ -29,8 +29,11 @@ use crate::skeleton::PlantSkeleton;
 /// How a [`crate::species::Structure`] grows.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Growth {
+    /// Rewriting rules read by a turtle.
     LSystem(LSystem),
+    /// Space colonization of a crown envelope.
     Colonize(Colonize),
+    /// Weber & Penn's recursive branching tables.
     Recursive(Recursive),
 }
 

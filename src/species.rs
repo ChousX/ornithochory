@@ -14,9 +14,24 @@ use thiserror::Error;
 
 use crate::grow::Growth;
 
+/// Registers [`Species`] assets and their loader. Added by
+/// [`crate::OrnithochoryPlugin`].
+#[derive(Default)]
+pub struct SpeciesPlugin;
+
+impl Plugin for SpeciesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_asset::<Species>().init_asset_loader::<SpeciesLoader>();
+    }
+}
+
+/// One kind of plant: what it looks like, and where it grows.
 #[derive(Asset, TypePath, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Species {
+    /// Seeds its variants and its placement, so renaming a species
+    /// regrows and moves its plants.
     pub name: String,
+    /// What it is made of.
     pub form: Form,
     /// How many distinct shapes are generated and cached. Each plant shows
     /// one, picked by its seed, and differs from its siblings by scale,
@@ -24,6 +39,7 @@ pub struct Species {
     /// with the number of plants.
     #[serde(default = "default_variants")]
     pub variants: u8,
+    /// Where it grows.
     #[serde(default)]
     pub placement: Placement,
 }
@@ -32,19 +48,25 @@ const fn default_variants() -> u8 {
     8
 }
 
+/// A species' shape: stems, or a cover over the ground.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Form {
-    /// Boxed: a structure's description is far larger than a cover's.
+    /// Anything with stems. Boxed: a structure's description is far larger
+    /// than a cover's.
     Structure(Box<Structure>),
+    /// Grass, moss, lichen: only a density on a surface.
     Cover(Cover),
 }
 
 /// A plant with stems.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Structure {
+    /// How the stems grow.
     pub growth: Growth,
+    /// How the stems look.
     #[serde(default)]
     pub bark: Bark,
+    /// The leaves, if it has any.
     #[serde(default)]
     pub leaves: Option<Leaves>,
     /// Radius of a stem tip, metres; the pipe model widens it downwards.
@@ -63,11 +85,13 @@ const fn default_pipe_exponent() -> f32 {
     2.3
 }
 
+/// How a structure's stems are meshed and shaded.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Bark {
     /// sRGB, 0..1.
     pub color: [f32; 3],
+    /// Perceptual roughness, 0..1.
     pub roughness: f32,
     /// Sides of the thickest stem at the hero tier; thinner and farther
     /// stems get fewer (see `PlantLod::sides`).
@@ -100,6 +124,7 @@ impl Default for Bark {
     }
 }
 
+/// A structure's leaves: where they hang, their shape and colour.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Leaves {
@@ -107,7 +132,9 @@ pub struct Leaves {
     pub color: [f32; 3],
     /// Per-leaf brightness jitter, 0..1.
     pub color_jitter: f32,
+    /// Stalk to tip, metres, before per-leaf jitter.
     pub length: f32,
+    /// Across at the widest, metres.
     pub width: f32,
     /// Leaves at every node within this many segments of a tip, besides any
     /// the grower placed itself (an L-system's `L`). 0 = only those.
@@ -188,6 +215,7 @@ impl Default for Leaves {
 /// A plant that is a density on a surface.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Cover {
+    /// The shape repeated over the surface.
     pub tuft: Tuft,
     /// sRGB, 0..1.
     pub color: [f32; 3],
@@ -235,6 +263,7 @@ const fn default_dry_color() -> [f32; 3] {
 pub enum Tuft {
     /// A clump of geometry blades: grass, sedge, young shoots.
     Blades {
+        /// Blades in a tuft at the hero tier.
         count: u8,
         /// Mean blade height, metres.
         height: f32,
@@ -243,6 +272,7 @@ pub enum Tuft {
         /// How far a blade bends over, as a fraction of its height. Each
         /// blade draws its own from about half to one and a half times this.
         lean: f32,
+        /// Lengthwise segments of the tallest blades at the hero tier.
         segments: u8,
         /// Clump radius as a fraction of `height`.
         #[serde(default = "default_spread")]
@@ -259,7 +289,9 @@ pub enum Tuft {
     /// A low cushion of overlapping mounds with lobed outlines: cushion
     /// moss, lichen rosettes.
     Cushion {
+        /// Rim radius, metres.
         radius: f32,
+        /// Height at the top, metres.
         height: f32,
         /// Points around the rim at the hero tier.
         sides: u8,
@@ -341,6 +373,7 @@ impl Default for Placement {
     }
 }
 
+/// Smooth noise that leaves bare patches between stands of a species.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(default)]
 pub struct DensityNoise {
@@ -348,6 +381,7 @@ pub struct DensityNoise {
     pub frequency: f32,
     /// -1..1; higher = barer.
     pub threshold: f32,
+    /// Layers of finer noise over the patches; more give raggeder edges.
     pub octaves: u8,
 }
 
@@ -367,10 +401,13 @@ impl Default for SpeciesLoader {
     }
 }
 
+/// Why a `*.plant.ron` file didn't load.
 #[derive(Debug, Error)]
 pub enum SpeciesLoaderError {
+    /// The file couldn't be read.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The file isn't a valid species.
     #[error(transparent)]
     Ron(#[from] ron::error::SpannedError),
 }
@@ -393,5 +430,42 @@ impl AssetLoader for SpeciesLoader {
 
     fn extensions(&self) -> &[&str] {
         &["plant.ron"]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The species the README shows, as it is written there: what it leaves
+    /// out takes the defaults.
+    #[test]
+    fn the_readme_species_parses() {
+        let readme = include_str!("../README.md");
+        let block = readme.split("```ron").nth(1).and_then(|s| s.split("```").next()).unwrap();
+        let s: Species = ron::from_str(block).unwrap();
+        assert_eq!((s.name.as_str(), s.variants), ("oak", 6));
+        let Form::Structure(st) = &s.form else { panic!("the oak is a structure") };
+        assert!(matches!(st.growth, Growth::Colonize(_)));
+        assert_eq!(st.bark, Bark::default());
+        assert!((st.pipe_exponent - default_pipe_exponent()).abs() < f32::EPSILON);
+        assert!((s.placement.spacing - 7.0).abs() < f32::EPSILON);
+        assert_eq!(s.placement.altitude, Placement::default().altitude);
+    }
+
+    #[test]
+    fn a_bare_cover_takes_the_defaults() {
+        let s: Species = ron::from_str(
+            "(name: \"g\", form: Cover((tuft: Blades(count: 4, height: 0.2, width: 0.01, lean: 0.2, segments: 2), color: (0.2, 0.4, 0.1))))",
+        )
+        .unwrap();
+        assert_eq!(s.variants, default_variants());
+        assert_eq!(s.placement, Placement::default());
+        let Form::Cover(c) = &s.form else { panic!("a cover") };
+        assert!((c.shade - default_shade()).abs() < f32::EPSILON);
+        assert_eq!(c.dry_color, default_dry_color());
+        let Tuft::Blades { spread, height_jitter, .. } = c.tuft else { panic!("blades") };
+        assert!((spread - default_spread()).abs() < f32::EPSILON);
+        assert!((height_jitter - default_height_jitter()).abs() < f32::EPSILON);
     }
 }
