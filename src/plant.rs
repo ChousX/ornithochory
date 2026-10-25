@@ -203,9 +203,9 @@ fn apply_plant_materials(
     let mut set = |commands: &mut Commands, id: AssetId<Species>, s: &Species, own: Option<&PlantMaterials>, parts: (Option<Entity>, Entity)| {
         let mats = library.materials_for(id, s, &mut materials, &mut images, &assets).overridden(own);
         if let Some(stems) = parts.0 {
-            commands.entity(stems).insert(MeshMaterial3d(mats.bark));
+            commands.entity(stems).try_insert(MeshMaterial3d(mats.bark));
         }
-        commands.entity(parts.1).insert(MeshMaterial3d(mats.foliage));
+        commands.entity(parts.1).try_insert(MeshMaterial3d(mats.foliage));
     };
     for (plant, parts, own) in &plants {
         if own.is_changed()
@@ -372,10 +372,10 @@ fn show(commands: &mut Commands, part: Entity, handle: Option<&Handle<Mesh>>) {
     let mut e = commands.entity(part);
     match handle {
         Some(h) => {
-            e.insert((Mesh3d(h.clone()), Visibility::Inherited));
+            e.try_insert((Mesh3d(h.clone()), Visibility::Inherited));
         }
         None => {
-            e.insert(Visibility::Hidden);
+            e.try_insert(Visibility::Hidden);
         }
     }
 }
@@ -404,7 +404,7 @@ fn attach_plants(
         }
         commands
             .entity(entity)
-            .insert((PlantParts { stems, foliage, radius: ready.radius }, PlantTier(tier)));
+            .try_insert((PlantParts { stems, foliage, radius: ready.radius }, PlantTier(tier)));
     }
 }
 
@@ -499,14 +499,14 @@ fn reload_species(
             continue;
         }
         if let Some(parts) = parts {
-            commands.entity(parts.stems).despawn();
-            commands.entity(parts.foliage).despawn();
+            commands.entity(parts.stems).try_despawn();
+            commands.entity(parts.foliage).try_despawn();
         }
-        commands.entity(entity).remove::<(PlantParts, PlantTier)>();
+        commands.entity(entity).try_remove::<(PlantParts, PlantTier)>();
     }
     for (entity, patch) in &patches {
         if changed.contains(&patch.species.id()) {
-            commands.entity(entity).remove::<(CoverBuilt, CoverTask, Mesh3d)>();
+            commands.entity(entity).try_remove::<(CoverBuilt, CoverTask, Mesh3d)>();
         }
     }
 }
@@ -560,7 +560,7 @@ fn build_cover(
     waiting: Query<(Entity, &CoverPatch), (Without<CoverBuilt>, Without<CoverTask>)>,
 ) {
     for entity in &changed {
-        commands.entity(entity).remove::<CoverBuilt>();
+        commands.entity(entity).try_remove::<CoverBuilt>();
     }
     let mut free = quality.max_cover_in_flight.saturating_sub(running.iter().count());
     for (entity, patch) in &waiting {
@@ -570,7 +570,7 @@ fn build_cover(
         let Some(s) = species.get(&patch.species) else { continue };
         let (s, tufts, lod) = (s.clone(), patch.tufts.clone(), patch.lod);
         let task = AsyncComputeTaskPool::get().spawn(async move { merge_cover(&s, &tufts, lod) });
-        commands.entity(entity).insert(CoverTask(task));
+        commands.entity(entity).try_insert(CoverTask(task));
         free = free.saturating_sub(1);
     }
 }
@@ -588,14 +588,14 @@ fn finish_cover(
     for (entity, patch, mut task, own) in &mut tasks {
         let Some(data) = check_ready(&mut task.0) else { continue };
         let mut e = commands.entity(entity);
-        e.remove::<CoverTask>().insert(CoverBuilt);
+        e.try_remove::<CoverTask>().try_insert(CoverBuilt);
         let Some(s) = species.get(&patch.species) else { continue };
         if data.is_empty() {
-            e.remove::<Mesh3d>();
+            e.try_remove::<Mesh3d>();
             continue;
         }
         let mats = library.materials_for(patch.species.id(), s, &mut materials, &mut images, &assets).overridden(own);
-        e.insert((Mesh3d(meshes.add(data.into_mesh())), MeshMaterial3d(mats.foliage)));
+        e.try_insert((Mesh3d(meshes.add(data.into_mesh())), MeshMaterial3d(mats.foliage)));
     }
 }
 

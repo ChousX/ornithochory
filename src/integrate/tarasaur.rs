@@ -187,7 +187,7 @@ fn scatter_chunks<M: VoxelMaterial>(
 
         for &child in children.into_iter().flatten() {
             if flora_children.contains(child) {
-                commands.entity(child).despawn();
+                commands.entity(child).try_despawn();
             }
         }
 

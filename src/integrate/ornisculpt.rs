@@ -28,11 +28,11 @@ impl Plugin for OrnisculptPlantsPlugin {
 }
 
 fn mob_bends(trigger: On<Add<Mob>>, mut commands: Commands) {
-    commands.entity(trigger.entity).insert(FoliageBender::default());
+    commands.entity(trigger.entity).try_insert(FoliageBender::default());
 }
 
 fn tier_camera_picks_plants(trigger: On<Add<TierCamera>>, mut commands: Commands) {
-    commands.entity(trigger.entity).insert(PlantCamera);
+    commands.entity(trigger.entity).try_insert(PlantCamera);
 }
 
 /// A bender as wide as its mob, once the mob's body exists.
