@@ -45,8 +45,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
-# The same sources as Domain Expance, so an app using all three gets one copy
-# of each.
+# Git `main`, where apps take these crates from too, so an app using them
+# together gets one copy of each.
 tarasaur = { git = "https://github.com/ChousX/tarasaur", branch = "main", optional = true }
 ornisculpt = { git = "https://github.com/ChousX/ornisculpt", branch = "main", optional = true }
 

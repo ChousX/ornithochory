@@ -14,11 +14,16 @@
 //! 5. [`scatter`]: placement as a pure function of world seed and position,
 //!    so a region re-scatters to the same plants and nothing is saved.
 //!
+//! Beside the flow, [`bend`]: anything with a [`bend::FoliageBender`] pushes
+//! small plants aside.
+//!
 //! Integrations, each behind its feature:
 //! - `tarasaur`: species scatter over terrain chunks as they stream in and
 //!   re-scatter where the terrain is edited ([`integrate::tarasaur`]).
 //! - `ornisculpt`: mobs push plants aside and ornisculpt's `TierCamera`
 //!   also picks plant tiers ([`integrate::ornisculpt`]).
+//! - `genetics`: a whole species as one genome (`design`), whose
+//!   [`lever`]s name the values a design lets vary.
 //!
 //! Research behind the design: `docs/research/procedural-plants.md`.
 

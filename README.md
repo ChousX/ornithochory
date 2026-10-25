@@ -136,7 +136,33 @@ re-scatters when what it shows changes.
 
 Add `OrnisculptPlantsPlugin`. Every mob becomes a `FoliageBender` as wide
 as its body (small plants lean out of its way), and a camera with
-ornisculpt's `TierCamera` also picks plant tiers.
+ornisculpt's `TierCamera` also picks plant tiers. Any other entity can push
+plants too: give it a `FoliageBender`.
+
+### Plant designs (`--features genetics`)
+
+A whole species can be written as DNA with the
+[genetics](https://github.com/ChousX/genetics) crate. A
+`*.plant-design.ron` names a species and the traits that may vary, each a
+`PlantLever` and the range it varies within:
+
+```ron
+(
+    species: "species/grass.plant.ron",
+    traits: [
+        Lever(lever: Height, range: (0.18, 0.45)),
+        Lever(lever: BladeCount, range: (10.0, 22.0)),
+    ],
+)
+```
+
+`OrnithochoryPlugin` loads these as `PlantDesign` assets. `founder()` is
+the design's first genome, the species as designed; mutate it with
+`genetics`, and `design::express` gives back the species a genome grows.
+Everything else in the species is a fixed gene that mutation never
+touches. A genome is a strain, not a single plant: every plant grown from
+it shares its cached variants. `Complexity::of` counts what one variant
+costs (stem nodes and organs), for budgets.
 
 ## Examples
 
@@ -158,7 +184,7 @@ Early. Working: species assets with hot reload, L-system, space
 colonization and recursive (Weber-Penn) growers, stems, leaves with
 clumps and crown-shaped normals, grass and moss tufts, three tiers,
 cached variants generated off-thread, cover patches, deterministic
-placement, tarasaur scattering, ornisculpt benders.
+placement, tarasaur scattering, ornisculpt benders, plant designs as DNA.
 
 Next, in order of what they buy (see `docs/design/roadmap.md`):
 
