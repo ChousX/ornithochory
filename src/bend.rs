@@ -36,14 +36,32 @@ impl Default for FoliageBender {
     }
 }
 
-/// The benders nearest the cameras this frame: `xyz` position, `w` radius.
+/// The benders nearest the cameras this frame, nearest first.
 #[derive(Resource, Clone, Debug, Default)]
-pub struct Benders(pub Vec<Vec4>);
+pub struct Benders(pub Vec<Bender>);
 
 impl Benders {
     /// Most benders kept; the nearest win.
     pub const MAX: usize = 64;
 }
+
+/// One bender as [`Benders`] holds it for a frame.
+///
+/// `#[repr(C)]` and 16 bytes, the layout of a WGSL `vec4<f32>` with the
+/// position in `xyz` and the radius in `w` (or of a WGSL
+/// `struct { position: vec3<f32>, radius: f32 }`), so the list can go to a
+/// foliage shader as it is.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bender {
+    /// World space, metres.
+    pub position: Vec3,
+    /// How far it pushes plants, metres, its entity's scale included.
+    pub radius: f32,
+}
+
+// The layout the doc comment promises a shader: `xyz`, then `w`, 16 bytes.
+const _: () = assert!(size_of::<Bender>() == 16 && std::mem::offset_of!(Bender, radius) == 12);
 
 /// A [`FoliageBender`]'s radius unless it says otherwise, metres: about a
 /// person or a small animal.
@@ -64,16 +82,17 @@ fn gather_benders(
     mut out: ResMut<Benders>,
 ) {
     let eyes: Vec<Vec3> = tier_cameras(cameras.iter()).iter().map(|(t, ..)| t.translation()).collect();
-    let all = benders.iter().map(|(t, b)| t.translation().extend(b.radius * t.scale().max_element()));
+    let all = benders
+        .iter()
+        .map(|(t, b)| Bender { position: t.translation(), radius: b.radius * t.scale().max_element() });
     out.0.clear();
     out.0.extend(nearest(&eyes, all));
 }
 
-/// The [`Benders::MAX`] benders (`xyz` position, `w` radius) nearest any of
-/// `eyes`, nearest first.
-fn nearest(eyes: &[Vec3], benders: impl Iterator<Item = Vec4>) -> impl Iterator<Item = Vec4> {
+/// The [`Benders::MAX`] benders nearest any of `eyes`, nearest first.
+fn nearest(eyes: &[Vec3], benders: impl Iterator<Item = Bender>) -> impl Iterator<Item = Bender> {
     let near = |p: Vec3| eyes.iter().map(|e| e.distance_squared(p)).fold(f32::MAX, f32::min);
-    let mut all: Vec<(f32, Vec4)> = benders.map(|b| (near(b.truncate()), b)).collect();
+    let mut all: Vec<(f32, Bender)> = benders.map(|b| (near(b.position), b)).collect();
     all.sort_by(|a, b| a.0.total_cmp(&b.0));
     all.into_iter().take(Benders::MAX).map(|(_, v)| v)
 }
@@ -100,10 +119,10 @@ fn lean_plants(
 
 /// The rotation a plant rooted at `root`, `radius` metres wide, leans to
 /// away from `benders`: harder the nearer they are, at most [`MAX_LEAN`].
-fn lean(root: Vec3, radius: f32, benders: &[Vec4]) -> Quat {
+fn lean(root: Vec3, radius: f32, benders: &[Bender]) -> Quat {
     let push = benders.iter().fold(Vec3::ZERO, |acc, b| {
-        let away = (root - b.truncate()).with_y(0.0);
-        let reach = radius.mul_add(PLANT_REACH, b.w);
+        let away = (root - b.position).with_y(0.0);
+        let reach = radius.mul_add(PLANT_REACH, b.radius);
         let d = away.length();
         // A bender right on the root pushes no way in particular.
         if d >= reach || d < 1e-4 {
@@ -124,29 +143,34 @@ fn lean(root: Vec3, radius: f32, benders: &[Vec4]) -> Quat {
 mod tests {
     use super::*;
 
+    fn at(x: f32, y: f32, radius: f32) -> Bender {
+        Bender { position: Vec3::new(x, y, 0.0), radius }
+    }
+
     #[test]
     fn plants_lean_away_and_less_from_farther() {
-        let near = lean(Vec3::ZERO, 0.4, &[Vec4::new(-0.2, 0.0, 0.0, 0.5)]) * Vec3::Y;
-        let far = lean(Vec3::ZERO, 0.4, &[Vec4::new(-0.5, 0.0, 0.0, 0.5)]) * Vec3::Y;
+        let near = lean(Vec3::ZERO, 0.4, &[at(-0.2, 0.0, 0.5)]) * Vec3::Y;
+        let far = lean(Vec3::ZERO, 0.4, &[at(-0.5, 0.0, 0.5)]) * Vec3::Y;
         assert!(near.x > far.x && far.x > 0.0, "{near} {far}");
         assert!(Vec3::Y.angle_between(near) <= MAX_LEAN + 1e-5);
     }
 
     #[test]
     fn out_of_reach_or_on_the_root_is_upright() {
-        assert_eq!(lean(Vec3::ZERO, 0.4, &[Vec4::new(3.0, 0.0, 0.0, 0.5)]), Quat::IDENTITY);
-        assert_eq!(lean(Vec3::ZERO, 0.4, &[Vec4::new(0.0, 1.0, 0.0, 0.5)]), Quat::IDENTITY);
+        assert_eq!(lean(Vec3::ZERO, 0.4, &[at(3.0, 0.0, 0.5)]), Quat::IDENTITY);
+        assert_eq!(lean(Vec3::ZERO, 0.4, &[at(0.0, 1.0, 0.5)]), Quat::IDENTITY);
         assert_eq!(lean(Vec3::ZERO, 0.4, &[]), Quat::IDENTITY);
     }
 
     #[test]
     fn the_nearest_benders_win() {
         let eyes = [Vec3::ZERO, Vec3::new(100.0, 0.0, 0.0)];
-        let all = (0u8..100).map(|i| Vec4::new(f32::from(i), 0.0, 0.0, 1.0));
-        let kept: Vec<Vec4> = nearest(&eyes, all).collect();
+        let all = (0u8..100).map(|i| at(f32::from(i), 0.0, 1.0));
+        let kept: Vec<Bender> = nearest(&eyes, all).collect();
         assert_eq!(kept.len(), Benders::MAX);
         // Nearest first: one at each eye, then outwards from both.
-        assert_eq!(kept.first().map(|b| b.x), Some(0.0));
-        assert!(kept.iter().all(|b| b.x <= 32.0 || b.x >= 69.0), "{kept:?}");
+        assert_eq!(kept.first().map(|b| b.position.x), Some(0.0));
+        assert!(kept.iter().all(|b| b.position.x <= 32.0 || b.position.x >= 69.0), "{kept:?}");
     }
+
 }

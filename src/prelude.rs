@@ -1,7 +1,7 @@
 //! Common imports: `use ornithochory::prelude::*;`.
 
 pub use crate::OrnithochoryPlugin;
-pub use crate::bend::{Benders, FoliageBender};
+pub use crate::bend::{Bender, Benders, FoliageBender};
 pub use crate::mesh::PlantLod;
 pub use crate::plant::{
     CoverPatch, ForcePlantTier, Plant, PlantCamera, PlantLibrary, PlantMaterials, PlantParts, PlantQuality, PlantSet, PlantTier,
