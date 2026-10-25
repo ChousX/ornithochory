@@ -2925,6 +2925,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "genetics"
+version = "0.3.0"
+dependencies = [
+ "rand 0.10.3",
+ "serde",
+ "thiserror 2.0.21",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "gethostname"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4620,7 +4630,10 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "fastnoise-lite",
+ "genetics",
  "ornisculpt",
+ "rand 0.10.3",
+ "rand_pcg",
  "ron",
  "serde",
  "tarasaur",

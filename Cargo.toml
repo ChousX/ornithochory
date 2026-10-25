@@ -17,6 +17,9 @@ tarasaur = ["dep:tarasaur"]
 # Ornisculpt mobs bend the plants they walk through, and ornisculpt's
 # `TierCamera` also picks plant tiers: `integrate::ornisculpt`.
 ornisculpt = ["dep:ornisculpt"]
+# Plants as DNA (`design`): a whole species in one genome, with the traits a
+# design lets vary (`lever`), through the `genetics` crate.
+genetics = ["dep:genetics"]
 
 [dependencies]
 # Only the parts the library uses; the app's own `bevy` dependency picks the
@@ -35,6 +38,8 @@ bevy = { version = "0.20", default-features = false, features = [
     "serialize",
 ] }
 fastnoise-lite = "1.1"
+# Local until its `traits` branch is pushed.
+genetics = { path = "../genetics", optional = true }
 ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
@@ -46,6 +51,9 @@ tarasaur = { git = "https://github.com/ChousX/tarasaur", branch = "main", option
 ornisculpt = { git = "https://github.com/ChousX/ornisculpt", branch = "main", optional = true }
 
 [dev-dependencies]
+# Seeded mutation in the design tests.
+rand = "0.10"
+rand_pcg = "0.10"
 # Examples open windows and take input, so they need Bevy's default features.
 bevy = "0.20"
 

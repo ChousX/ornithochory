@@ -23,9 +23,12 @@
 //! Research behind the design: `docs/research/procedural-plants.md`.
 
 pub mod bend;
+#[cfg(feature = "genetics")]
+pub mod design;
 pub mod generate;
 pub mod grow;
 pub mod integrate;
+pub mod lever;
 pub mod mesh;
 pub mod num;
 pub mod plant;
@@ -72,5 +75,7 @@ impl Plugin for OrnithochoryPlugin {
                         .in_set(PlantSet::Tier),
                 ),
             );
+        #[cfg(feature = "genetics")]
+        app.add_plugins(design::PlantDesignPlugin);
     }
 }
