@@ -51,7 +51,7 @@ impl PlantLod {
     /// Every tier, finest first.
     pub const ALL: [Self; 3] = [Self::Hero, Self::Near, Self::Far];
 
-    /// The tier's place in [`Self::ALL`], and in per-tier arrays.
+    /// The tier's place in [`Self::ALL`].
     #[must_use]
     pub const fn index(self) -> usize {
         match self {
@@ -103,6 +103,53 @@ impl PlantLod {
             Self::Hero => u32::from(authored.max(1)),
             Self::Near | Self::Far => 1,
         }
+    }
+}
+
+/// One `T` for each [`PlantLod`], by name: what a variant holds per tier.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PerTier<T> {
+    /// At [`PlantLod::Hero`].
+    pub hero: T,
+    /// At [`PlantLod::Near`].
+    pub near: T,
+    /// At [`PlantLod::Far`].
+    pub far: T,
+}
+
+impl<T> PerTier<T> {
+    /// Each tier's value from `f`, finest first.
+    pub fn from_fn(mut f: impl FnMut(PlantLod) -> T) -> Self {
+        Self { hero: f(PlantLod::Hero), near: f(PlantLod::Near), far: f(PlantLod::Far) }
+    }
+
+    /// The value at `lod`.
+    #[must_use]
+    pub const fn get(&self, lod: PlantLod) -> &T {
+        match lod {
+            PlantLod::Hero => &self.hero,
+            PlantLod::Near => &self.near,
+            PlantLod::Far => &self.far,
+        }
+    }
+
+    /// The value at `lod`, to change.
+    pub const fn get_mut(&mut self, lod: PlantLod) -> &mut T {
+        match lod {
+            PlantLod::Hero => &mut self.hero,
+            PlantLod::Near => &mut self.near,
+            PlantLod::Far => &mut self.far,
+        }
+    }
+
+    /// Every tier's value through `f`, finest first.
+    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> PerTier<U> {
+        PerTier { hero: f(self.hero), near: f(self.near), far: f(self.far) }
+    }
+
+    /// Each tier and its value, finest first.
+    pub fn iter(&self) -> impl Iterator<Item = (PlantLod, &T)> {
+        PlantLod::ALL.into_iter().map(move |lod| (lod, self.get(lod)))
     }
 }
 
@@ -258,6 +305,17 @@ impl MeshData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn per_tier_values_go_by_their_tier() {
+        let mut t = PerTier::from_fn(PlantLod::index);
+        assert_eq!(t, PerTier { hero: 0, near: 1, far: 2 });
+        *t.get_mut(PlantLod::Near) += 10;
+        assert_eq!(*t.get(PlantLod::Near), 11);
+        assert_eq!(t.map(|v| v * 2), PerTier { hero: 0, near: 22, far: 4 });
+        let order: Vec<(PlantLod, usize)> = t.iter().map(|(lod, &v)| (lod, v)).collect();
+        assert_eq!(order, [(PlantLod::Hero, 0), (PlantLod::Near, 11), (PlantLod::Far, 2)]);
+    }
 
     #[test]
     fn tangents_follow_u_and_stay_perpendicular() {

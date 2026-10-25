@@ -1,7 +1,7 @@
 //! Species + variant -> meshes for every tier. Pure functions, no ECS: safe
 //! to run on `AsyncComputeTaskPool`, and what the plugin caches per variant.
 
-use crate::mesh::{MeshData, PlantLod, cover, leaves, tube};
+use crate::mesh::{MeshData, PerTier, PlantLod, cover, leaves, tube};
 use crate::random::{PlantRng, stable_hash};
 use crate::skeleton::PlantSkeleton;
 use crate::species::{Form, Species, Structure};
@@ -22,8 +22,8 @@ pub struct TierMeshes {
 /// Every tier of one variant, plus its bounding radius for tier selection.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GeneratedVariant {
-    /// Meshes per tier, in [`PlantLod::index`] order.
-    pub tiers: [TierMeshes; 3],
+    /// Meshes per tier.
+    pub tiers: PerTier<TierMeshes>,
     /// Distance from the plant's origin to its farthest point, metres.
     pub radius: f32,
 }
@@ -72,15 +72,14 @@ pub fn generate(species: &Species, variant: u8) -> GeneratedVariant {
             let (lo, hi) = skel.bounds();
             let leaf = s.leaves.as_ref().map_or(0.0, |l| l.length * LEAF_REACH);
             GeneratedVariant {
-                tiers: PlantLod::ALL.map(|lod| mesh_structure(&skel, s, seed, lod)),
+                tiers: PerTier::from_fn(|lod| mesh_structure(&skel, s, seed, lod)),
                 radius: lo.abs().max(hi.abs()).length() + leaf,
             }
         }
         Form::Cover(c) => {
-            let tiers = PlantLod::ALL.map(|lod| TierMeshes { stems: MeshData::default(), foliage: cover::tuft(c, lod, seed) });
+            let tiers = PerTier::from_fn(|lod| TierMeshes { stems: MeshData::default(), foliage: cover::tuft(c, lod, seed) });
             // Sized by the hero tuft, the most detailed.
-            let [hero, ..] = &tiers;
-            let radius = hero.foliage.positions.iter().map(|&p| bevy::math::Vec3::from(p).length()).fold(0.0, f32::max);
+            let radius = tiers.hero.foliage.positions.iter().map(|&p| bevy::math::Vec3::from(p).length()).fold(0.0, f32::max);
             GeneratedVariant { tiers, radius }
         }
     }
@@ -105,28 +104,28 @@ mod tests {
             let species = load(stem);
             let t = std::time::Instant::now();
             let v = generate(&species, 0);
-            let hero = &v.tiers[0];
-            let tris = (hero.stems.indices.len() + hero.foliage.indices.len()) / 3;
+            let hero = &v.tiers.hero;
+            let cost = |t: &TierMeshes| t.stems.indices.len() + t.foliage.indices.len();
+            let tris = cost(hero) / 3;
             eprintln!(
                 "{stem}: {tris} hero tris ({} stems, {} foliage; near {}, far {}), radius {:.2} m, {:?}",
                 hero.stems.indices.len() / 3,
                 hero.foliage.indices.len() / 3,
-                (v.tiers[1].stems.indices.len() + v.tiers[1].foliage.indices.len()) / 3,
-                (v.tiers[2].stems.indices.len() + v.tiers[2].foliage.indices.len()) / 3,
+                cost(&v.tiers.near) / 3,
+                cost(&v.tiers.far) / 3,
                 v.radius,
                 t.elapsed()
             );
             assert!(tris > 0, "{stem} made nothing");
             assert!(v.radius > 0.0);
-            for tier in &v.tiers {
+            for (_, tier) in v.tiers.iter() {
                 for m in [&tier.stems, &tier.foliage] {
                     assert!(m.indices.iter().all(|&i| i < m.vertex_count()), "{stem}: index out of range");
                     assert!(m.positions.iter().flatten().all(|c| c.is_finite()), "{stem}: non-finite vertex");
                 }
             }
             // Coarser tiers never cost more.
-            let cost = |t: &TierMeshes| t.stems.indices.len() + t.foliage.indices.len();
-            assert!(cost(&v.tiers[2]) <= cost(&v.tiers[1]) && cost(&v.tiers[1]) <= cost(&v.tiers[0]), "{stem}");
+            assert!(cost(&v.tiers.far) <= cost(&v.tiers.near) && cost(&v.tiers.near) <= cost(hero), "{stem}");
             n += 1;
         }
         assert!(n >= 4, "only {n} species found");

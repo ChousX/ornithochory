@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
 
 use crate::generate::{GeneratedVariant, generate, variant_seed};
-use crate::mesh::{MeshData, PlantLod, cover};
+use crate::mesh::{MeshData, PerTier, PlantLod, cover};
 use crate::random::{PlantRng, hash_unit};
 use crate::scatter::Placed;
 use crate::species::{Form, Species};
@@ -170,8 +170,8 @@ type VariantKey = (AssetId<Species>, u8);
 /// One variant's uploaded meshes, per tier.
 #[derive(Clone, Debug)]
 pub struct ReadyVariant {
-    /// Per tier, in [`PlantLod::index`] order.
-    pub tiers: [ReadyTier; 3],
+    /// Each tier's meshes.
+    pub tiers: PerTier<ReadyTier>,
     /// Distance from the plant's origin to its farthest point, metres.
     pub radius: f32,
 }
@@ -409,9 +409,7 @@ fn poll_variants(mut library: ResMut<PlantLibrary>, mut meshes: ResMut<Assets<Me
         let VariantSlot::Pending(task) = slot else { continue };
         let Some(done) = check_ready(task) else { continue };
         let mut upload = |m: MeshData| (!m.is_empty()).then(|| meshes.add(m.into_mesh()));
-        let [hero, near, far] = done.tiers;
-        let mut tier = |t: crate::generate::TierMeshes| ReadyTier { stems: upload(t.stems), foliage: upload(t.foliage) };
-        let tiers = [tier(hero), tier(near), tier(far)];
+        let tiers = done.tiers.map(|t| ReadyTier { stems: upload(t.stems), foliage: upload(t.foliage) });
         *slot = VariantSlot::Ready(ReadyVariant { tiers, radius: done.radius });
     }
 }
@@ -447,10 +445,9 @@ fn attach_plants(
         let tier = force.map_or(PlantLod::Far, |f| f.0);
         let stems = commands.spawn((PlantPart, MeshMaterial3d(mats.bark), ChildOf(entity))).id();
         let foliage = commands.spawn((PlantPart, MeshMaterial3d(mats.foliage), ChildOf(entity))).id();
-        if let Some(meshes) = ready.tiers.get(tier.index()) {
-            show(&mut commands, stems, meshes.stems.as_ref());
-            show(&mut commands, foliage, meshes.foliage.as_ref());
-        }
+        let meshes = ready.tiers.get(tier);
+        show(&mut commands, stems, meshes.stems.as_ref());
+        show(&mut commands, foliage, meshes.foliage.as_ref());
         commands
             .entity(entity)
             .try_insert((PlantParts { stems, foliage, radius: ready.radius }, PlantTier(tier)));
@@ -521,7 +518,7 @@ pub(crate) fn choose_tiers(
         }
         let Some(s) = species.get(&plant.species) else { continue };
         let Some(ready) = library.ready(plant.species.id(), variant_of(s, plant.seed)) else { continue };
-        let Some(meshes) = ready.tiers.get(next.index()) else { continue };
+        let meshes = ready.tiers.get(next);
         show(&mut commands, parts.stems, meshes.stems.as_ref());
         show(&mut commands, parts.foliage, meshes.foliage.as_ref());
         tier.0 = next;
@@ -719,10 +716,10 @@ mod tests {
     fn grove_cover_budget() {
         use crate::scatter::{GroundHit, scatter, species_seed};
         let flat = |p: Vec2| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: None });
-        let mut total = [0usize; 3];
+        let mut total = PerTier::<usize>::default();
         for name in ["grass", "moss"] {
             let s = bundled(name);
-            let mut tris = [0usize; 3];
+            let mut tris = PerTier::<usize>::default();
             let mut verts = 0usize;
             let mut tufts = 0usize;
             let t = std::time::Instant::now();
@@ -734,7 +731,7 @@ mod tests {
                     for lod in PlantLod::ALL {
                         let m = merge_cover(&s, &placed, lod);
                         assert!(m.indices.iter().all(|&i| i < m.vertex_count()), "{name}: index out of range");
-                        tris[lod.index()] += m.indices.len() / 3;
+                        *tris.get_mut(lod) += m.indices.len() / 3;
                         if lod == PlantLod::Hero {
                             verts += m.positions.len();
                         }
@@ -743,13 +740,13 @@ mod tests {
             }
             eprintln!(
                 "{name}: {tufts} tufts, hero {} tris ({verts} verts), near {}, far {} ({:?} for all tiers)",
-                tris[0], tris[1], tris[2], t.elapsed()
+                tris.hero, tris.near, tris.far, t.elapsed()
             );
-            assert!(tris[2] <= tris[1] && tris[1] <= tris[0], "{name}: coarser tiers cost more");
-            for (a, b) in total.iter_mut().zip(tris) {
-                *a += b;
+            assert!(tris.far <= tris.near && tris.near <= tris.hero, "{name}: coarser tiers cost more");
+            for lod in PlantLod::ALL {
+                *total.get_mut(lod) += tris.get(lod);
             }
         }
-        eprintln!("cover total: hero {} tris, near {}, far {}", total[0], total[1], total[2]);
+        eprintln!("cover total: hero {} tris, near {}, far {}", total.hero, total.near, total.far);
     }
 }
