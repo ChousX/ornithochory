@@ -307,20 +307,6 @@ impl LSystem {
     }
 
     fn interpret(&self, modules: &[Module], rng: &mut PlantRng) -> PlantSkeleton {
-        #[derive(Clone, Copy)]
-        struct Turtle {
-            pos: Vec3,
-            rot: Quat,
-            node: u32,
-            order: u8,
-            step: f32,
-            /// Floor for the radius of new nodes (`#`).
-            width: f32,
-            tropism: f32,
-            /// Left the envelope: nothing more grows on this branch.
-            cut: bool,
-        }
-
         let mut skel = PlantSkeleton::rooted_at(Vec3::ZERO);
         let mut t = Turtle {
             pos: Vec3::ZERO,
@@ -343,31 +329,7 @@ impl LSystem {
                 Quat::from_axis_angle(axis, sign.mul_add(angle, rng.signed() * jitter))
             };
             match m.symbol {
-                'F' | 'f' => {
-                    if t.cut {
-                        continue;
-                    }
-                    let to = t.pos + t.rot * Vec3::Y * (t.step * a.unwrap_or(1.0));
-                    if self.envelope.is_some_and(|e| !e.contains(to)) {
-                        t.cut = true;
-                        continue;
-                    }
-                    t.pos = to;
-                    if m.symbol == 'F' {
-                        t.node = skel.push(t.node, t.pos, t.order);
-                        if let Some(n) = skel.nodes.last_mut() {
-                            n.radius = t.width;
-                        }
-                        // Bend the heading towards the tropism vector, in
-                        // proportion to how far it points away (ABOP 2.4).
-                        let h = t.rot * Vec3::Y;
-                        let axis = h.cross(tropism);
-                        let amount = axis.length() * t.tropism;
-                        if amount.abs() > 1e-6 {
-                            t.rot = Quat::from_axis_angle(axis.normalize(), amount) * t.rot;
-                        }
-                    }
-                }
+                'F' | 'f' => self.forward(&mut t, &mut skel, a.unwrap_or(1.0), m.symbol == 'F', tropism),
                 '+' => t.rot *= turn(Vec3::Z, 1.0, rng),
                 '-' => t.rot *= turn(Vec3::Z, -1.0, rng),
                 '&' => t.rot *= turn(Vec3::X, 1.0, rng),
@@ -400,6 +362,55 @@ impl LSystem {
         }
         skel
     }
+
+    /// Moves the turtle `steps` steps ahead, making a node if `grow` (`F`,
+    /// not `f`), unless that would leave the envelope: then the branch is
+    /// cut there.
+    fn forward(&self, t: &mut Turtle, skel: &mut PlantSkeleton, steps: f32, grow: bool, tropism: Vec3) {
+        if t.cut {
+            return;
+        }
+        let to = t.pos + t.rot * Vec3::Y * (t.step * steps);
+        if self.envelope.is_some_and(|e| !e.contains(to)) {
+            t.cut = true;
+            return;
+        }
+        t.pos = to;
+        if grow {
+            t.node = skel.push(t.node, t.pos, t.order);
+            if let Some(n) = skel.nodes.last_mut() {
+                n.radius = t.width;
+            }
+            // Bend the heading towards the tropism vector, in proportion to
+            // how far it points away (ABOP 2.4).
+            let h = t.rot * Vec3::Y;
+            let axis = h.cross(tropism);
+            let amount = axis.length() * t.tropism;
+            if amount.abs() > 1e-6 {
+                t.rot = Quat::from_axis_angle(axis.normalize(), amount) * t.rot;
+            }
+        }
+    }
+}
+
+/// The L-system's turtle: where it is, which way it heads, and the state
+/// `[` saves and `]` restores.
+#[derive(Clone, Copy)]
+struct Turtle {
+    pos: Vec3,
+    rot: Quat,
+    /// The last node made: the next one's parent.
+    node: u32,
+    /// Branch order: one more inside every `[`.
+    order: u8,
+    /// Length of one step, metres.
+    step: f32,
+    /// Floor for the radius of new nodes (`#`), metres.
+    width: f32,
+    /// Tropism strength (`~`).
+    tropism: f32,
+    /// Left the envelope: nothing more grows on this branch.
+    cut: bool,
 }
 
 /// The matching rule for `m`, if any: its symbol, enough arguments, a true
