@@ -194,7 +194,12 @@ impl PlantSkeleton {
     /// along one branch, starting at the node it grows from.
     #[must_use]
     pub fn chains(&self) -> Vec<Vec<u32>> {
-        let cont = self.continuations();
+        self.chains_along(&self.continuations())
+    }
+
+    /// The plant cut into axes like [`Self::chains`], each carrying on into
+    /// the child `cont` names for its last node (`None` ends it).
+    pub(crate) fn chains_along(&self, cont: &[Option<u32>]) -> Vec<Vec<u32>> {
         let follow = |start: Vec<u32>| {
             let mut chain = start;
             while let Some(next) = chain.last().and_then(|&l| cont.get(usize_from(l)).copied().flatten()) {

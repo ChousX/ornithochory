@@ -37,7 +37,7 @@ pub fn stems(skel: &PlantSkeleton, bark: &Bark, tip_radius: f32, lod: PlantLod) 
             // branch itself so it doesn't bulge out of the stem it leaves.
             let r = if k == 0 && chain.len() > 1 {
                 let next = chain.get(1).and_then(|&j| skel.node(j)).map_or(n.radius, |c| c.radius);
-                n.radius.min(next * 1.15)
+                n.radius.min(next * MAX_FLARE)
             } else {
                 n.radius
             };
@@ -58,19 +58,30 @@ pub fn stems(skel: &PlantSkeleton, bark: &Bark, tip_radius: f32, lod: PlantLod) 
             rings = smoothed(&rings);
         }
         let sides = lod.sides(thickest, max_radius, base_sides);
-        let phase = hash_unit(u64::try_from(ci).unwrap_or(0), 0x5eed);
+        let phase = hash_unit(u64::try_from(ci).unwrap_or(0), PHASE_LANE);
         let order_w = f32::from(order) / max_order;
         tube(&mut out, &rings, sides, |path| Vec4::new(path / reach, order_w, phase, 0.0));
     }
     out
 }
 
-/// Limbs thicker than `tip_radius` times this, and than this fraction of
-/// the trunk, get a Catmull-Rom midpoint in every segment (Hero and Near),
-/// so a coarse skeleton bends smoothly where it shows most. Twigs keep
-/// their nodes.
+/// Limbs thicker than `tip_radius` times this, and than
+/// [`SMOOTH_FRACTION`] of the trunk, get a Catmull-Rom midpoint in every
+/// segment (Hero and Near), so a coarse skeleton bends smoothly where it
+/// shows most. Twigs keep their nodes.
 const SMOOTH_ABOVE: f32 = 3.0;
+/// See [`SMOOTH_ABOVE`]: a fraction of the thickest stem's radius.
 const SMOOTH_FRACTION: f32 = 0.25;
+/// A branch's first ring, which sits on the stem it leaves, is at most this
+/// many times as wide as its second, so it doesn't bulge out of that stem.
+const MAX_FLARE: f32 = 1.15;
+/// Picks each chain's wind phase from the hash of its index (see
+/// [`hash_unit`]).
+const PHASE_LANE: u64 = 0x5eed;
+/// Where an axis forks, the child it carries on into is the one with the
+/// most cross-section, weighted by how straight on it goes: from 1 dead
+/// ahead down to this for a child turning straight back.
+const MIN_STRAIGHTNESS: f32 = 0.05;
 
 /// The skeleton cut into axes like [`PlantSkeleton::chains`], except that
 /// an axis carries on into the child with the most cross-section, weighted
@@ -88,28 +99,12 @@ fn axes(skel: &PlantSkeleton) -> Vec<Vec<u32>> {
             let incoming = n.parent.and_then(|p| skel.node(p)).map_or(Vec3::Y, |p| (n.pos - p.pos).normalize_or(Vec3::Y));
             let score = |c: u32| {
                 let r = skel.node(c).map_or(0.0, |c| c.radius);
-                r * r * incoming.dot(dir(n.pos, c)).mul_add(0.5, 0.5).max(0.05)
+                r * r * incoming.dot(dir(n.pos, c)).mul_add(0.5, 0.5).max(MIN_STRAIGHTNESS)
             };
             kids.get(i)?.iter().copied().max_by(|&a, &b| score(a).total_cmp(&score(b)).then(b.cmp(&a)))
         })
         .collect();
-    let follow = |start: Vec<u32>| {
-        let mut chain = start;
-        while let Some(next) = chain.last().and_then(|&l| cont.get(usize_from(l)).copied().flatten()) {
-            chain.push(next);
-        }
-        chain
-    };
-    let mut chains = Vec::new();
-    for (i, n) in skel.nodes.iter().enumerate() {
-        let i = crate::num::u32_from_usize(i);
-        match n.parent {
-            None => chains.push(follow(vec![i])),
-            Some(p) if cont.get(usize_from(p)).copied().flatten() != Some(i) => chains.push(follow(vec![p, i])),
-            Some(_) => {}
-        }
-    }
-    chains
+    skel.chains_along(&cont)
 }
 
 /// `rings` with a Catmull-Rom midpoint in every segment.
