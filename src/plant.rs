@@ -279,64 +279,89 @@ impl PlantLibrary {
         self.materials
             .entry(id)
             .or_insert_with(|| {
-                let (bark, roughness) = match &species.form {
-                    Form::Structure(s) => (s.bark.color, s.bark.roughness),
-                    Form::Cover(_) => ([1.0; 3], 0.8),
-                };
-                // Colour comes from the vertices; both faces are drawn.
-                let mut foliage = StandardMaterial {
-                    perceptual_roughness: 0.7,
-                    reflectance: 0.35,
-                    cull_mode: None,
-                    ..default()
-                };
-                if let Form::Structure(_) = &species.form {
-                    // Leaves are not `double_sided`: that flips the normal
-                    // on back faces, which turns every leaf seen from
-                    // behind black. The leaf mesher turns each normal to
-                    // the lit side (and can bend it to the crown's), so
-                    // both faces share it, like a thin leaf lit through.
-                    // A little diffuse transmission lights the side turned
-                    // from the sun too; without `TransmittedShadowReceiver`
-                    // it costs one more Lambert term per light and no
-                    // shadow lookup. Matte: at 0.7, sprays seen at a
-                    // grazing angle sheen grey.
-                    foliage.perceptual_roughness = 0.85;
-                    foliage.diffuse_transmission = 0.3;
-                }
-                if let Form::Cover(c) = &species.form {
-                    // Cover normals are bent towards the ground's up (see
-                    // `mesh::cover`), so a field shades like the surface
-                    // it covers, and they are not flipped on back faces
-                    // (`double_sided` stays off): a blade seen from behind
-                    // is lit like its front. Rougher, and a fine speckle
-                    // of shoot tips if it asks for one, scaled so it
-                    // darkens nothing on average (what its mips fade to).
-                    foliage.perceptual_roughness = 0.85;
-                    foliage.reflectance = 0.25;
-                    if c.detail > 0.0 {
-                        let (image, mean) = cover::detail_texture(c.detail, crate::random::stable_hash(0, &species.name));
-                        foliage.base_color = Color::LinearRgba(LinearRgba::gray(mean.max(0.05).recip()));
-                        foliage.base_color_texture = Some(images.add(image));
-                    }
-                }
-                let mut bark_material = StandardMaterial {
-                    base_color: Color::srgb(bark[0], bark[1], bark[2]),
-                    perceptual_roughness: roughness,
-                    ..default()
-                };
-                if let Form::Structure(s) = &species.form {
-                    let b = &s.bark;
-                    bark_material.base_color_texture = b.texture.as_ref().map(|p| assets.load(p.clone()));
-                    bark_material.normal_map_texture = b.normal_map.as_ref().map(|p| assets.load(p.clone()));
-                    bark_material.uv_transform = Affine2::from_scale(Vec2::from(b.uv_scale));
-                }
-                SpeciesMaterials {
-                    bark: materials.add(bark_material),
-                    foliage: materials.add(foliage),
-                }
+                let foliage = foliage_material(species, images);
+                let bark = bark_material(species, assets);
+                SpeciesMaterials { bark: materials.add(bark), foliage: materials.add(foliage) }
             })
             .clone()
+    }
+}
+
+/// Leaves' perceptual roughness. Matte: at 0.7, sprays seen at a grazing
+/// angle sheen grey.
+const LEAF_ROUGHNESS: f32 = 0.85;
+/// Leaves' specular reflectance, 0..1.
+const LEAF_REFLECTANCE: f32 = 0.35;
+/// The share of light that passes through a leaf to light its far side,
+/// 0..1.
+const LEAF_TRANSMISSION: f32 = 0.3;
+/// Grass and moss: perceptual roughness.
+const COVER_ROUGHNESS: f32 = 0.85;
+/// Grass and moss: specular reflectance, 0..1.
+const COVER_REFLECTANCE: f32 = 0.25;
+/// The darkest mean a cover's detail speckle is compensated for: a floor so
+/// a near-black speckle doesn't blow the base colour up.
+const MIN_DETAIL_MEAN: f32 = 0.05;
+/// Seeds the detail speckle, hashed with the species' name.
+const DETAIL_SEED: u64 = 0;
+/// Never shown (a cover has no stems), but every species gets a bark
+/// material: a cover's is white with this perceptual roughness.
+const COVER_BARK_ROUGHNESS: f32 = 0.8;
+
+/// A species' leaf, blade or cushion material. Colour comes from the
+/// vertices; both faces are drawn.
+fn foliage_material(species: &Species, images: &mut Assets<Image>) -> StandardMaterial {
+    let both_faces = StandardMaterial { cull_mode: None, ..default() };
+    match &species.form {
+        // Leaves are not `double_sided`: that flips the normal on back
+        // faces, which turns every leaf seen from behind black. The leaf
+        // mesher turns each normal to the lit side (and can bend it to the
+        // crown's), so both faces share it, like a thin leaf lit through. A
+        // little diffuse transmission lights the side turned from the sun
+        // too; without `TransmittedShadowReceiver` it costs one more Lambert
+        // term per light and no shadow lookup.
+        Form::Structure(_) => StandardMaterial {
+            perceptual_roughness: LEAF_ROUGHNESS,
+            reflectance: LEAF_REFLECTANCE,
+            diffuse_transmission: LEAF_TRANSMISSION,
+            ..both_faces
+        },
+        // Cover normals are bent towards the ground's up (see
+        // `mesh::cover`), so a field shades like the surface it covers, and
+        // they are not flipped on back faces (`double_sided` stays off): a
+        // blade seen from behind is lit like its front. Rougher, and a fine
+        // speckle of shoot tips if it asks for one, scaled so it darkens
+        // nothing on average (what its mips fade to).
+        Form::Cover(c) => {
+            let mut foliage =
+                StandardMaterial { perceptual_roughness: COVER_ROUGHNESS, reflectance: COVER_REFLECTANCE, ..both_faces };
+            if c.detail > 0.0 {
+                let (image, mean) = cover::detail_texture(c.detail, crate::random::stable_hash(DETAIL_SEED, &species.name));
+                foliage.base_color = Color::LinearRgba(LinearRgba::gray(mean.max(MIN_DETAIL_MEAN).recip()));
+                foliage.base_color_texture = Some(images.add(image));
+            }
+            foliage
+        }
+    }
+}
+
+/// A species' stem material: its bark's colour, roughness and textures.
+fn bark_material(species: &Species, assets: &AssetServer) -> StandardMaterial {
+    match &species.form {
+        Form::Structure(s) => {
+            let b = &s.bark;
+            StandardMaterial {
+                base_color: Color::srgb(b.color[0], b.color[1], b.color[2]),
+                perceptual_roughness: b.roughness,
+                base_color_texture: b.texture.as_ref().map(|p| assets.load(p.clone())),
+                normal_map_texture: b.normal_map.as_ref().map(|p| assets.load(p.clone())),
+                uv_transform: Affine2::from_scale(Vec2::from(b.uv_scale)),
+                ..default()
+            }
+        }
+        Form::Cover(_) => {
+            StandardMaterial { base_color: Color::srgb(1.0, 1.0, 1.0), perceptual_roughness: COVER_BARK_ROUGHNESS, ..default() }
+        }
     }
 }
 
@@ -421,11 +446,16 @@ fn attach_plants(
     }
 }
 
+/// Plants nearer the camera than this, metres (or behind it), are sized as
+/// if this near: huge, so they stay at the finest tier.
+const MIN_DEPTH: f32 = 0.01;
+
 /// Approximate on-screen height (pixels) of a sphere of `radius` at `pos`.
+/// A custom projection counts every plant as filling the viewport.
 fn screen_px(cam: &GlobalTransform, proj: &Projection, viewport_h: f32, pos: Vec3, radius: f32) -> f32 {
     match proj {
         Projection::Perspective(p) => {
-            let depth = (pos - cam.translation()).dot(cam.forward().as_vec3()).max(0.01);
+            let depth = (pos - cam.translation()).dot(cam.forward().as_vec3()).max(MIN_DEPTH);
             radius * 2.0 / (depth * (p.fov * 0.5).tan() * 2.0) * viewport_h
         }
         Projection::Orthographic(o) => radius * 2.0 / o.area.height().max(1e-3) * viewport_h,
@@ -548,6 +578,18 @@ pub struct CoverBuilt;
 #[derive(Component)]
 struct CoverTask(Task<MeshData>);
 
+/// Lanes of a tuft's seed (see [`hash_unit`]) for its brightness and its
+/// warmth, clear of the lanes placement draws from the same hash.
+const BRIGHTNESS_LANE: u64 = 9;
+/// See [`BRIGHTNESS_LANE`].
+const WARMTH_LANE: u64 = 10;
+/// Every tuft's brightness is scaled by `TUFT_BRIGHTNESS + u *
+/// TUFT_BRIGHTNESS_SPREAD` for a hashed `u` in `0..1`, on top of the
+/// cover's own `color_jitter`.
+const TUFT_BRIGHTNESS: f32 = 0.95;
+/// See [`TUFT_BRIGHTNESS`].
+const TUFT_BRIGHTNESS_SPREAD: f32 = 0.1;
+
 /// Merges a patch's tufts: one tuft mesh per variant, copied to every
 /// placement with a per-tuft brightness and warmth tint.
 #[must_use]
@@ -559,9 +601,10 @@ pub fn merge_cover(species: &Species, tufts: &[Placed], lod: PlantLod) -> MeshDa
     let mut out = MeshData::default();
     for t in tufts {
         let Some(shape) = shapes.get(usize::from(variant_of(species, t.seed))) else { continue };
-        let k = PlantRng::new(t.seed).signed().mul_add(c.color_jitter, 1.0) * hash_unit(t.seed, 9).mul_add(0.1, 0.95);
+        let k = PlantRng::new(t.seed).signed().mul_add(c.color_jitter, 1.0)
+            * hash_unit(t.seed, BRIGHTNESS_LANE).mul_add(TUFT_BRIGHTNESS_SPREAD, TUFT_BRIGHTNESS);
         // Some tufts a little yellower, some bluer, so a stand isn't one green.
-        let warm = hash_unit(t.seed, 10).mul_add(2.0, -1.0) * c.color_jitter;
+        let warm = hash_unit(t.seed, WARMTH_LANE).mul_add(2.0, -1.0) * c.color_jitter;
         out.append_transformed(shape, &t.transform, Vec4::new(k * (1.0 + warm), k, k * (1.0 - warm), 1.0));
     }
     out
@@ -619,6 +662,35 @@ fn finish_cover(
 mod tests {
     use super::*;
 
+    fn bundled(name: &str) -> Species {
+        let path = format!("{}/assets/species/{name}.plant.ron", env!("CARGO_MANIFEST_DIR"));
+        ron::de::from_bytes(&std::fs::read(&path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn seeds_pick_every_variant() {
+        let mut oak = bundled("oak");
+        oak.variants = 4;
+        let picked: Vec<u8> = (0..8).map(|seed| variant_of(&oak, seed)).collect();
+        assert_eq!(picked, [0, 1, 2, 3, 0, 1, 2, 3]);
+        oak.variants = 0;
+        assert_eq!(variant_of(&oak, 7), 0, "no variants still shows one");
+    }
+
+    #[test]
+    fn screen_size_halves_with_twice_the_distance() {
+        let cam = GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y));
+        let fov = bevy::camera::PerspectiveProjection { fov: std::f32::consts::FRAC_PI_2, ..default() };
+        let proj = Projection::Perspective(fov);
+        let near = screen_px(&cam, &proj, 720.0, Vec3::ZERO, 1.0);
+        let far = screen_px(&cam, &proj, 720.0, Vec3::new(0.0, 0.0, -10.0), 1.0);
+        // At 90 degrees the view is as tall as twice the depth.
+        assert!((near - 72.0).abs() < 1e-3, "{near}");
+        assert!(far.mul_add(-2.0, near).abs() < 1e-3, "{near} {far}");
+        let behind = screen_px(&cam, &proj, 720.0, Vec3::new(0.0, 0.0, 20.0), 1.0);
+        assert!(behind > near * 100.0, "behind the camera stays the finest tier");
+    }
+
     #[test]
     fn hysteresis_holds_near_a_threshold() {
         let q = PlantQuality::MEDIUM;
@@ -637,8 +709,7 @@ mod tests {
         let flat = |p: Vec2| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: None });
         let mut total = [0usize; 3];
         for name in ["grass", "moss"] {
-            let path = format!("{}/assets/species/{name}.plant.ron", env!("CARGO_MANIFEST_DIR"));
-            let s: Species = ron::de::from_bytes(&std::fs::read(&path).unwrap()).unwrap();
+            let s = bundled(name);
             let mut tris = [0usize; 3];
             let mut verts = 0usize;
             let mut tufts = 0usize;
