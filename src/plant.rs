@@ -376,6 +376,8 @@ fn request_variants(
     quality: Res<PlantQuality>,
     mut library: ResMut<PlantLibrary>,
 ) {
+    // Without a task pool (no `TaskPoolPlugin`) nothing generates.
+    let Some(pool) = AsyncComputeTaskPool::try_get() else { return };
     let mut free = quality.max_in_flight.saturating_sub(library.in_flight());
     for plant in &plants {
         if free == 0 {
@@ -387,7 +389,7 @@ fn request_variants(
             continue;
         }
         let (s, variant) = (s.clone(), key.1);
-        let task = AsyncComputeTaskPool::get().spawn(async move { generate(&s, variant) });
+        let task = pool.spawn(async move { generate(&s, variant) });
         library.variants.insert(key, VariantSlot::Pending(task));
         free = free.saturating_sub(1);
     }
@@ -621,6 +623,7 @@ fn build_cover(
     for entity in &changed {
         commands.entity(entity).try_remove::<CoverBuilt>();
     }
+    let Some(pool) = AsyncComputeTaskPool::try_get() else { return };
     let mut free = quality.max_cover_in_flight.saturating_sub(running.iter().count());
     for (entity, patch) in &waiting {
         if free == 0 {
@@ -628,7 +631,7 @@ fn build_cover(
         }
         let Some(s) = species.get(&patch.species) else { continue };
         let (s, tufts, lod) = (s.clone(), patch.tufts.clone(), patch.lod);
-        let task = AsyncComputeTaskPool::get().spawn(async move { merge_cover(&s, &tufts, lod) });
+        let task = pool.spawn(async move { merge_cover(&s, &tufts, lod) });
         commands.entity(entity).try_insert(CoverTask(task));
         free = free.saturating_sub(1);
     }
