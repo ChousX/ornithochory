@@ -28,7 +28,7 @@ use tarasaur::raycast::terrain_ray::TerrainRay;
 use crate::mesh::PlantLod;
 use crate::num::{f32_from_u32, u32_from_f32};
 use crate::plant::{CoverPatch, Plant, PlantSet};
-use crate::scatter::{GroundHit, scatter, species_seed};
+use crate::scatter::{GroundHit, Placed, scatter, species_seed};
 use crate::species::{Form, Species};
 
 /// What grows on the terrain.
@@ -161,13 +161,8 @@ fn scatter_chunks<M: VoxelMaterial>(
     if flora.entries.is_empty() || queue.0.is_empty() {
         return;
     }
-    let now = time.elapsed_secs();
-    // Oldest due first, so a busy edit can't starve the rest.
-    let mut due: Vec<(Entity, f32)> = queue.0.iter().filter(|(_, t)| **t <= now).map(|(e, t)| (*e, *t)).collect();
-    due.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-
     let mut casts = 0usize;
-    for (chunk, _) in due {
+    for chunk in due(&queue.0, time.elapsed_secs()) {
         if casts >= flora.casts_per_frame {
             break;
         }
@@ -210,34 +205,77 @@ fn scatter_chunks<M: VoxelMaterial>(
             })
         };
 
+        let at = ChunkSpot { chunk, origin, lod };
         for (handle, s) in wanted {
             let placed = scatter(&s.placement, species_seed(flora.world_seed, s), min, max, &mut ground);
-            if placed.is_empty() {
-                continue;
-            }
-            match &s.form {
-                Form::Structure(_) => {
-                    for p in placed {
-                        let mut t = p.transform;
-                        t.translation -= origin;
-                        commands.spawn((Plant { species: handle.clone(), seed: p.seed }, t, FloraPlant, ChildOf(chunk)));
-                    }
-                }
-                Form::Cover(_) => {
-                    let tufts: Arc<[_]> = placed
-                        .into_iter()
-                        .map(|mut p| {
-                            p.transform.translation -= origin;
-                            p
-                        })
-                        .collect();
-                    commands.spawn((
-                        CoverPatch { species: handle.clone(), tufts, lod: cover_tier(lod) },
-                        FloraPlant,
-                        ChildOf(chunk),
-                    ));
-                }
+            if !placed.is_empty() {
+                spawn_flora(&mut commands, &at, handle, s, placed);
             }
         }
+    }
+}
+
+/// The queued chunks due by `now` (seconds), oldest first, so a busy edit
+/// can't starve the rest.
+fn due(queue: &HashMap<Entity, f32>, now: f32) -> Vec<Entity> {
+    let mut due: Vec<(Entity, f32)> = queue.iter().filter(|(_, t)| **t <= now).map(|(e, t)| (*e, *t)).collect();
+    due.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    due.into_iter().map(|(e, _)| e).collect()
+}
+
+/// The chunk plants are scattered on: its entity, its world-space corner
+/// and its LOD.
+struct ChunkSpot {
+    chunk: Entity,
+    origin: Vec3,
+    lod: LOD,
+}
+
+/// Spawns `placed` (world space) on its chunk: a [`Plant`] each for a
+/// stemmed species, one [`CoverPatch`] for a cover.
+fn spawn_flora(commands: &mut Commands, at: &ChunkSpot, handle: &Handle<Species>, species: &Species, placed: Vec<Placed>) {
+    match &species.form {
+        Form::Structure(_) => {
+            for p in placed {
+                let mut t = p.transform;
+                t.translation -= at.origin;
+                commands.spawn((Plant { species: handle.clone(), seed: p.seed }, t, FloraPlant, ChildOf(at.chunk)));
+            }
+        }
+        Form::Cover(_) => {
+            let tufts: Arc<[_]> = placed
+                .into_iter()
+                .map(|mut p| {
+                    p.transform.translation -= at.origin;
+                    p
+                })
+                .collect();
+            commands.spawn((
+                CoverPatch { species: handle.clone(), tufts, lod: cover_tier(at.lod) },
+                FloraPlant,
+                ChildOf(at.chunk),
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn due_chunks_come_oldest_first() {
+        let mut world = World::new();
+        let [a, b, c] = [(); 3].map(|()| world.spawn_empty().id());
+        let queue = HashMap::from([(a, 2.0), (b, 1.0), (c, 5.0)]);
+        assert_eq!(due(&queue, 3.0), [b, a]);
+        assert_eq!(due(&queue, 0.5), Vec::<Entity>::new());
+    }
+
+    #[test]
+    fn cover_follows_the_terrain_detail() {
+        assert_eq!(cover_tier(LOD::High), PlantLod::Hero);
+        assert_eq!(cover_tier(LOD::Medium), PlantLod::Near);
+        assert_eq!(cover_tier(LOD::Lowest), PlantLod::Far);
     }
 }
