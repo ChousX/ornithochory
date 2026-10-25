@@ -22,6 +22,14 @@ use bevy::render::render_resource::VertexFormat;
 
 use crate::num::{u32_from_usize, usize_from};
 
+/// GPU bytes of the attributes every vertex has: position and normal (12
+/// each), UV (8) and wind (16).
+const BASE_VERTEX_BYTES: usize = 48;
+/// GPU bytes of a colour or a tangent, on meshes that have them.
+const VEC4_BYTES: usize = 16;
+/// GPU bytes of an index (`u32`).
+const INDEX_BYTES: usize = 4;
+
 /// Per-vertex wind weights; see the module docs.
 pub const ATTRIBUTE_WIND: MeshVertexAttribute =
     MeshVertexAttribute::new("Ornithochory_Wind", 0x0e17_4c40_9a1d_0001, VertexFormat::Float32x4);
@@ -237,13 +245,13 @@ impl MeshData {
     /// Bytes this mesh takes on the GPU (vertices + indices), for budgets.
     #[must_use]
     pub const fn gpu_bytes(&self) -> usize {
-        let colors = if self.colors.is_empty() { 0 } else { 16 };
-        let tangents = if self.tangents.is_empty() { 0 } else { 16 };
-        let per_vertex = 48usize.saturating_add(colors).saturating_add(tangents);
+        let colors = if self.colors.is_empty() { 0 } else { VEC4_BYTES };
+        let tangents = if self.tangents.is_empty() { 0 } else { VEC4_BYTES };
+        let per_vertex = BASE_VERTEX_BYTES.saturating_add(colors).saturating_add(tangents);
         self.positions
             .len()
             .saturating_mul(per_vertex)
-            .saturating_add(self.indices.len().saturating_mul(4))
+            .saturating_add(self.indices.len().saturating_mul(INDEX_BYTES))
     }
 }
 
