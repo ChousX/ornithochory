@@ -3,6 +3,8 @@
 //! the shrubs to show interaction.
 //!
 //! `cargo run --release --example grove`. Arrow keys orbit, W/S zoom.
+//! `grove-live` (devenv) runs it under `dx serve --hot-patch` from `live/`,
+//! so edits to it and to ornithochory patch in while it runs.
 //!
 //! Screenshot mode, for judging the look without a window:
 //! `GROVE_SHOTS=<dir> cargo run --release --example grove` runs headless,

@@ -1,0 +1,16 @@
+[package]
+name = "ornithochory-live"
+version = "0.0.0"
+edition = "2024"
+description = "The grove example as its own crate, for editing ornithochory while it runs under `dx serve --hot-patch`"
+publish = false
+
+# The example's own source: `cargo run --example grove` and this run the
+# same grove.
+[[bin]]
+name = "grove"
+path = "../examples/grove.rs"
+
+[dependencies]
+bevy = { version = "0.20", features = ["file_watcher", "hotpatching"] }
+ornithochory = { path = "..", features = ["hotpatching"] }

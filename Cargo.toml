@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/ChousX/ornithochory"
 keywords = ["bevy", "procedural", "vegetation", "trees", "gamedev"]
 categories = ["game-development", "rendering"]
-exclude = ["/docs", "/devenv.nix", "/devenv.yaml", "/devenv.lock", "/.envrc", "/clippy.toml", "/.gitignore"]
+exclude = ["/docs", "/live", "/devenv.nix", "/devenv.yaml", "/devenv.lock", "/.envrc", "/clippy.toml", "/.gitignore"]
 
 [features]
 # Scatter species over tarasaur terrain chunks as they stream in, and
@@ -20,6 +20,9 @@ ornisculpt = ["dep:ornisculpt"]
 # Plants as DNA (`design`): a whole species in one genome, with the traits a
 # design lets vary (`lever`), through the `genetics` crate.
 genetics = ["dep:genetics"]
+# Regrow every plant after `dx serve --hot-patch` swaps in new code, so an
+# edit to a grower or mesher shows without a restart (see `live/`).
+hotpatching = ["bevy/hotpatching"]
 
 [dependencies]
 # Only the parts the library uses; the app's own `bevy` dependency picks the
@@ -55,13 +58,23 @@ ornisculpt = { git = "https://github.com/ChousX/ornisculpt", branch = "main", op
 rand = "0.10"
 rand_pcg = "0.10"
 # Examples open windows and take input, so they need Bevy's default features.
-bevy = "0.20"
+# `file_watcher`: an edited `*.plant.ron` regrows while they run.
+bevy = { version = "0.20", features = ["file_watcher"] }
 
 [profile.dev]
 opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+# Full debuginfo for Bevy made every debug example 2.2 GB, all of it relinked
+# on each rebuild. Line tables still give backtraces through it.
+debug = "line-tables-only"
+
+# `live`: the grove example as a binary crate of its own. Run as an example,
+# `dx serve --hot-patch` patches only the example file, never the library
+# beside it (DioxusLabs/dioxus#5778); from its own crate it patches both.
+[workspace]
+members = ["live"]
 
 [[example]]
 name = "terrain"

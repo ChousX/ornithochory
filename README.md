@@ -178,6 +178,30 @@ and `stats.txt` (generation time, uncapped frame time), then exits.
 `GROVE_STACK=deferred,ssao,fog,bloom` (any subset) shows the plants under
 those Bevy renderer features.
 
+### Editing while it runs
+
+Species reload by themselves: save a `*.plant.ron` while an example runs
+and its plants regrow (the examples build Bevy with `file_watcher`).
+
+Code can too, through Bevy's `hotpatching` (Dioxus' subsecond, driven by
+`dx`, which the devenv shell provides):
+
+```sh
+grove-live   # dx serve --hot-patch on live/, assets from the repository root
+```
+
+Save a file under `src/` or `examples/grove.rs` and dx patches it into the
+running grove. With the `hotpatching` feature, ornithochory then drops its
+cached variants and regrows every plant and patch, so an edit to a grower,
+a mesher or a material shows without a restart. `live/` is the grove
+example as a crate of its own: dx patches the crates the running crate
+depends on, but not a library beside an example in the same package.
+
+A patch can't change a struct's fields (a species, a component, a
+resource), a system's parameters, which systems run, or what `Startup` did:
+for those, rebuild with `r` in dx. Your own app gets the same with
+`ornithochory/hotpatching` and its own `dx serve --hot-patch`.
+
 ## Status
 
 Early. Working: species assets with hot reload, L-system, space

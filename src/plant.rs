@@ -53,6 +53,15 @@ impl Plugin for PlantPlugin {
                     choose_tiers.in_set(PlantSet::Tier),
                 ),
             );
+        // `HotPatchPlugin` marks this changed after each patch.
+        #[cfg(feature = "hotpatching")]
+        app.add_systems(
+            Update,
+            regrow_after_hotpatch
+                .run_if(resource_exists_and_changed::<bevy::ecs::HotPatchChanges>)
+                .in_set(PlantSet::Generate)
+                .before(reload_species),
+        );
     }
 }
 
@@ -537,10 +546,38 @@ fn reload_species(
     if changed.is_empty() {
         return;
     }
-    library.variants.retain(|(id, _), _| !changed.contains(id));
-    library.materials.retain(|id, _| !changed.contains(id));
-    for (entity, plant, parts) in &plants {
-        if !changed.contains(&plant.species.id()) {
+    regrow(&mut commands, &mut library, &plants, &patches, |id| changed.contains(&id));
+}
+
+/// After `dx serve --hot-patch` swaps in new code, every species
+/// regenerates, so an edit to a grower, mesher or material shows without a
+/// restart.
+#[cfg(feature = "hotpatching")]
+fn regrow_after_hotpatch(
+    mut commands: Commands,
+    mut library: ResMut<PlantLibrary>,
+    plants: Query<(Entity, &Plant, Option<&PlantParts>)>,
+    patches: Query<(Entity, &CoverPatch)>,
+) {
+    if !library.variants.is_empty() {
+        info!("ornithochory: hot-patched, regrowing {} plants and {} patches", plants.iter().len(), patches.iter().len());
+    }
+    regrow(&mut commands, &mut library, &plants, &patches, |_| true);
+}
+
+/// Drops the variants and materials of the species `changed` picks, and
+/// detaches their plants and patches so they generate again.
+fn regrow(
+    commands: &mut Commands,
+    library: &mut PlantLibrary,
+    plants: &Query<(Entity, &Plant, Option<&PlantParts>)>,
+    patches: &Query<(Entity, &CoverPatch)>,
+    changed: impl Fn(AssetId<Species>) -> bool,
+) {
+    library.variants.retain(|(id, _), _| !changed(*id));
+    library.materials.retain(|id, _| !changed(*id));
+    for (entity, plant, parts) in plants {
+        if !changed(plant.species.id()) {
             continue;
         }
         if let Some(parts) = parts {
@@ -549,8 +586,8 @@ fn reload_species(
         }
         commands.entity(entity).try_remove::<(PlantParts, PlantTier)>();
     }
-    for (entity, patch) in &patches {
-        if changed.contains(&patch.species.id()) {
+    for (entity, patch) in patches {
+        if changed(patch.species.id()) {
             commands.entity(entity).try_remove::<(CoverBuilt, CoverTask, Mesh3d)>();
         }
     }
