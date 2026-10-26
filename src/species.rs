@@ -341,17 +341,17 @@ pub struct Placement {
     /// Fraction of cells that get a plant, before the rules below.
     pub probability: f32,
     /// Allowed ground slope, degrees from flat.
-    pub slope: (f32, f32),
+    pub slope: Range,
     /// Allowed ground height, metres.
-    pub altitude: (f32, f32),
+    pub altitude: Range,
     /// Host material ids allowed (the terrain's own ids). Empty = any.
     pub materials: Vec<u8>,
     /// Patchiness: cells where this noise is under `threshold` stay bare.
     pub noise: Option<DensityNoise>,
     /// 0 = stand upright (trees), 1 = follow the ground normal (moss).
     pub align: f32,
-    /// Uniform scale range.
-    pub scale: (f32, f32),
+    /// Uniform scale: each plant's is drawn evenly from this range.
+    pub scale: Range,
     /// Sink the base this far below the ground, metres, so it never floats
     /// on a slope.
     pub sink: f32,
@@ -362,15 +362,25 @@ impl Default for Placement {
         Self {
             spacing: 4.0,
             probability: 0.5,
-            slope: (0.0, 35.0),
-            altitude: (f32::MIN, f32::MAX),
+            slope: Range { min: 0.0, max: 35.0 },
+            altitude: Range { min: f32::MIN, max: f32::MAX },
             materials: Vec::new(),
             noise: None,
             align: 0.0,
-            scale: (0.85, 1.15),
+            scale: Range { min: 0.85, max: 1.15 },
             sink: 0.05,
         }
     }
+}
+
+/// The lowest and highest value a [`Placement`] rule allows, both included,
+/// in that rule's units: `(min: 0.0, max: 35.0)` in a species file.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Range {
+    /// The lowest value allowed.
+    pub min: f32,
+    /// The highest value allowed.
+    pub max: f32,
 }
 
 /// Smooth noise that leaves bare patches between stands of a species.
@@ -450,7 +460,19 @@ mod tests {
         assert_eq!(st.bark, Bark::default());
         assert!((st.pipe_exponent - default_pipe_exponent()).abs() < f32::EPSILON);
         assert!((s.placement.spacing - 7.0).abs() < f32::EPSILON);
+        assert_eq!(s.placement.slope, Range { min: 0.0, max: 25.0 });
         assert_eq!(s.placement.altitude, Placement::default().altitude);
+    }
+
+    /// A range names its ends; a bare `(lo, hi)` pair, the format before
+    /// ranges were named, doesn't load.
+    #[test]
+    fn placement_ranges_name_their_ends() {
+        let p: Placement = ron::from_str("(slope: (min: 5.0, max: 40.0), scale: (min: 0.5, max: 2.0))").unwrap();
+        assert_eq!(p.slope, Range { min: 5.0, max: 40.0 });
+        assert_eq!(p.scale, Range { min: 0.5, max: 2.0 });
+        assert_eq!(p.altitude, Placement::default().altitude);
+        assert!(ron::from_str::<Placement>("(slope: (5.0, 40.0))").is_err());
     }
 
     #[test]

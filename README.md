@@ -56,7 +56,7 @@ low-end hardware.
         )),
         leaves: Some((length: 0.16, width: 0.09, tip_depth: 2, per_node: 3)),
     )),
-    placement: (spacing: 7.0, probability: 0.45, slope: (0.0, 25.0)),
+    placement: (spacing: 7.0, probability: 0.45, slope: (min: 0.0, max: 25.0)),
 )
 ```
 

@@ -103,8 +103,8 @@ pub fn scatter(
     max: Vec2,
     mut ground: impl FnMut(Vec2) -> Option<GroundHit>,
 ) -> Vec<Placed> {
-    let cos_lo = placement.slope.1.to_radians().cos();
-    let cos_hi = placement.slope.0.to_radians().cos();
+    let cos_lo = placement.slope.max.to_radians().cos();
+    let cos_hi = placement.slope.min.to_radians().cos();
     candidates(placement, seed, min, max)
         .filter_map(|(p, h)| {
             let hit = ground(p)?;
@@ -114,7 +114,7 @@ pub fn scatter(
             if up < cos_lo - 1e-4 || up > cos_hi + 1e-4 {
                 return None;
             }
-            if hit.pos.y < placement.altitude.0 || hit.pos.y > placement.altitude.1 {
+            if hit.pos.y < placement.altitude.min || hit.pos.y > placement.altitude.max {
                 return None;
             }
             if !placement.materials.is_empty() && hit.material.is_none_or(|m| !placement.materials.contains(&m)) {
@@ -123,7 +123,7 @@ pub fn scatter(
             let yaw = Quat::from_rotation_y(hash_unit(h, YAW_LANE) * std::f32::consts::TAU);
             let tilt_to = Vec3::Y.lerp(hit.normal, placement.align.clamp(0.0, 1.0)).normalize_or(Vec3::Y);
             let rotation = Quat::from_rotation_arc(Vec3::Y, tilt_to) * yaw;
-            let (s0, s1) = placement.scale;
+            let (s0, s1) = (placement.scale.min, placement.scale.max);
             let scale = (s1 - s0).mul_add(hash_unit(h, SCALE_LANE), s0);
             let translation = hit.pos - tilt_to * (placement.sink * scale);
             Some(Placed { transform: Transform { translation, rotation, scale: Vec3::splat(scale) }, seed: h })
@@ -134,6 +134,7 @@ pub fn scatter(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::species::Range;
 
     /// Level ground of material 1 everywhere.
     fn flat() -> impl Fn(Vec2) -> Option<GroundHit> {
@@ -163,9 +164,9 @@ mod tests {
         let pl = Placement { spacing: 1.0, probability: 1.0, materials: vec![2], ..Placement::default() };
         assert_eq!(scatter(&pl, 1, Vec2::ZERO, Vec2::splat(5.0), flat()).len(), 0);
         let steep = |p: Vec2| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::new(1.0, 1.0, 0.0).normalize(), material: None });
-        let pl = Placement { spacing: 1.0, probability: 1.0, slope: (0.0, 30.0), ..Placement::default() };
+        let pl = Placement { spacing: 1.0, probability: 1.0, slope: Range { min: 0.0, max: 30.0 }, ..Placement::default() };
         assert_eq!(scatter(&pl, 1, Vec2::ZERO, Vec2::splat(5.0), steep).len(), 0);
-        let pl = Placement { slope: (0.0, 50.0), ..pl };
+        let pl = Placement { slope: Range { min: 0.0, max: 50.0 }, ..pl };
         assert_ne!(scatter(&pl, 1, Vec2::ZERO, Vec2::splat(5.0), steep).len(), 0);
     }
 }
