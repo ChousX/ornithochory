@@ -103,32 +103,35 @@ pub fn scatter(
     max: Vec2,
     mut ground: impl FnMut(Vec2) -> Option<GroundHit>,
 ) -> Vec<Placed> {
+    candidates(placement, seed, min, max).filter_map(|(p, h)| place(placement, ground(p)?, h)).collect()
+}
+
+/// One plant of `placement` on `hit`, if the ground suits it: its slope,
+/// height and material. `seed` turns and sizes it, and becomes its own.
+/// What [`scatter`] does at each candidate, for a host that roots plants
+/// one at a time (a seed landing, a plant set down by hand).
+#[must_use]
+pub fn place(placement: &Placement, hit: GroundHit, seed: u64) -> Option<Placed> {
     let cos_lo = placement.slope.1.to_radians().cos();
     let cos_hi = placement.slope.0.to_radians().cos();
-    candidates(placement, seed, min, max)
-        .filter_map(|(p, h)| {
-            let hit = ground(p)?;
-            let up = hit.normal.y;
-            // A little slack, so ground exactly at a limit isn't lost to
-            // rounding.
-            if up < cos_lo - 1e-4 || up > cos_hi + 1e-4 {
-                return None;
-            }
-            if hit.pos.y < placement.altitude.0 || hit.pos.y > placement.altitude.1 {
-                return None;
-            }
-            if !placement.materials.is_empty() && hit.material.is_none_or(|m| !placement.materials.contains(&m)) {
-                return None;
-            }
-            let yaw = Quat::from_rotation_y(hash_unit(h, YAW_LANE) * std::f32::consts::TAU);
-            let tilt_to = Vec3::Y.lerp(hit.normal, placement.align.clamp(0.0, 1.0)).normalize_or(Vec3::Y);
-            let rotation = Quat::from_rotation_arc(Vec3::Y, tilt_to) * yaw;
-            let (s0, s1) = placement.scale;
-            let scale = (s1 - s0).mul_add(hash_unit(h, SCALE_LANE), s0);
-            let translation = hit.pos - tilt_to * (placement.sink * scale);
-            Some(Placed { transform: Transform { translation, rotation, scale: Vec3::splat(scale) }, seed: h })
-        })
-        .collect()
+    let up = hit.normal.y;
+    // A little slack, so ground exactly at a limit isn't lost to rounding.
+    if up < cos_lo - 1e-4 || up > cos_hi + 1e-4 {
+        return None;
+    }
+    if hit.pos.y < placement.altitude.0 || hit.pos.y > placement.altitude.1 {
+        return None;
+    }
+    if !placement.materials.is_empty() && hit.material.is_none_or(|m| !placement.materials.contains(&m)) {
+        return None;
+    }
+    let yaw = Quat::from_rotation_y(hash_unit(seed, YAW_LANE) * std::f32::consts::TAU);
+    let tilt_to = Vec3::Y.lerp(hit.normal, placement.align.clamp(0.0, 1.0)).normalize_or(Vec3::Y);
+    let rotation = Quat::from_rotation_arc(Vec3::Y, tilt_to) * yaw;
+    let (s0, s1) = placement.scale;
+    let scale = (s1 - s0).mul_add(hash_unit(seed, SCALE_LANE), s0);
+    let translation = hit.pos - tilt_to * (placement.sink * scale);
+    Some(Placed { transform: Transform { translation, rotation, scale: Vec3::splat(scale) }, seed })
 }
 
 #[cfg(test)]

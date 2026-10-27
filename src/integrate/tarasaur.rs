@@ -128,8 +128,10 @@ fn queue_chunks(
     }
 }
 
-/// The voxel material at `p`, read just inside the surface.
-fn material_at<M: VoxelMaterial>(
+/// The voxel material at `p` on the ground, read just inside the surface
+/// along `normal`: what [`Placement::materials`](crate::species::Placement)
+/// is matched against.
+pub fn material_at<M: VoxelMaterial>(
     chunks: &ChunkManager,
     materials: &Query<&MaterialField<M>>,
     p: Vec3,
