@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::grow::{Envelope, Growth};
-use crate::species::{Form, Species, Structure, Tuft};
+use crate::species::{Cover, Form, Species, Structure, Tuft};
 
 /// One kind of value a design may vary; [`PlantLever::paths`] finds where
 /// it sits in a given species.
@@ -79,6 +79,30 @@ pub enum PlantLever {
     Lean,
     /// Blades in a tuft.
     BladeCount,
+    /// One sRGB channel of a cover's tips, if it names their colour.
+    TipColor(u8),
+    /// Mounds in a cushion.
+    Lumps,
+    /// How lobed a cushion's outline is: 0 round, 0.4 deeply lobed.
+    Lobes,
+    /// How far a cushion's mounds sprawl, as a multiple of the usual.
+    Sprawl,
+    /// A cushion's mound profile: higher, a flatter top.
+    Flatness,
+    /// A cushion's mound profile: lower, a steeper drop to the rim.
+    Shoulder,
+    /// Bristles (single-triangle shoots) on a cushion.
+    Bristles,
+    /// Bristle height, as a fraction of the cushion's.
+    BristleHeight,
+    /// How far a cushion's rim bristles lean out, per unit of height.
+    BristleSplay,
+    /// Sporophytes per cushion, on average.
+    Capsules,
+    /// Sporophyte stalk height, as a multiple of the cushion's.
+    CapsuleHeight,
+    /// One sRGB channel of a cushion's sporophytes.
+    CapsuleColor(u8),
     /// Grid cell size, metres: at most one plant per cell.
     Spacing,
     /// Fraction of cells that get a plant.
@@ -120,10 +144,12 @@ impl PlantLever {
             | Self::BarkColor(_)
             | Self::LeafColor(_)
             | Self::CoverColor(_)
+            | Self::TipColor(_)
+            | Self::CapsuleColor(_)
             | Self::BarkRoughness
             | Self::Dry
             | Self::Probability => (0.0, 1.0),
-            Self::LevelCount(_) => (0.0, 400.0),
+            Self::LevelCount(_) | Self::Bristles => (0.0, 400.0),
             Self::Tropism | Self::LevelLength(_) | Self::Lean => (0.0, 2.0),
             Self::LevelCurve(_) => (-180.0, 180.0),
             Self::TipRadius => (0.0005, 0.2),
@@ -133,6 +159,13 @@ impl PlantLever {
             Self::LeafDroop => (-PI, PI),
             Self::LeafCluster => (1.0, 32.0),
             Self::BladeCount => (1.0, 64.0),
+            Self::Lumps => (0.0, 16.0),
+            Self::Lobes => (0.0, 0.6),
+            Self::Flatness => (0.5, 10.0),
+            Self::Shoulder => (0.05, 2.0),
+            Self::Sprawl | Self::BristleHeight | Self::BristleSplay => (0.0, 3.0),
+            Self::Capsules => (0.0, 64.0),
+            Self::CapsuleHeight => (0.0, 10.0),
             Self::Spacing => (0.01, 100.0),
         }
     }
@@ -140,7 +173,7 @@ impl PlantLever {
     /// Whether the lever counts whole things (and so varies in whole steps).
     #[must_use]
     pub const fn is_count(&self) -> bool {
-        matches!(self, Self::LevelCount(_) | Self::LeafCluster | Self::BladeCount)
+        matches!(self, Self::LevelCount(_) | Self::LeafCluster | Self::BladeCount | Self::Lumps | Self::Bristles | Self::Capsules)
     }
 
     /// Where the values this lever turns sit in `species`, as genome paths.
@@ -222,16 +255,29 @@ impl PlantLever {
                     _ => Err(not("has no such leaf value")),
                 }
             }
-            Self::CoverColor(_) | Self::Dry | Self::Lean | Self::BladeCount => {
+            Self::CoverColor(_) | Self::TipColor(_) | Self::Dry | Self::Lean | Self::BladeCount => {
                 let Form::Cover(cover) = &species.form else { return Err(not("isn't a cover")) };
                 match (self, &cover.tuft) {
                     (Self::CoverColor(c), _) => channel(c, "form.Cover.color"),
+                    (Self::TipColor(c), _) if cover.tip_color.is_some() => channel(c, "form.Cover.tip_color"),
+                    (Self::TipColor(_), _) => Err(not("lightens its tips from its colour")),
                     (Self::Dry, _) => one("form.Cover.dry".into()),
                     (Self::Lean, Tuft::Blades { .. }) => one("form.Cover.tuft.Blades.lean".into()),
                     (Self::BladeCount, Tuft::Blades { .. }) => one("form.Cover.tuft.Blades.count".into()),
                     _ => Err(not("has no blades")),
                 }
             }
+            Self::Lumps
+            | Self::Lobes
+            | Self::Sprawl
+            | Self::Flatness
+            | Self::Shoulder
+            | Self::Bristles
+            | Self::BristleHeight
+            | Self::BristleSplay
+            | Self::Capsules
+            | Self::CapsuleHeight
+            | Self::CapsuleColor(_) => self.cushion(species, &not),
             Self::Spacing => one("placement.spacing".into()),
             Self::Probability => one("placement.probability".into()),
         }
@@ -255,9 +301,32 @@ impl PlantLever {
             Envelope::Vase { .. } => vec![format!("{base}.Vase.{}", if radius { "radius" } else { "height" })],
         })
     }
+
+    /// A cushion's path for one of its levers ([`Self::Lumps`] through
+    /// [`Self::CapsuleColor`]).
+    fn cushion(&self, species: &Species, not: &dyn Fn(&'static str) -> LeverError) -> Result<Vec<String>, LeverError> {
+        let Form::Cover(Cover { tuft: Tuft::Cushion { .. }, .. }) = &species.form else { return Err(not("is no cushion")) };
+        let field = match self {
+            Self::CapsuleColor(c) if *c < 3 => return Ok(vec![format!("{CUSHION}.capsule_color.{c}")]),
+            Self::CapsuleColor(_) => return Err(not("has three colour channels")),
+            Self::Lumps => "lumps",
+            Self::Lobes => "lobes",
+            Self::Sprawl => "sprawl",
+            Self::Flatness => "flatness",
+            Self::Shoulder => "shoulder",
+            Self::Bristles => "bristles",
+            Self::BristleHeight => "bristle_height",
+            Self::BristleSplay => "bristle_splay",
+            Self::Capsules => "capsules",
+            Self::CapsuleHeight => "capsule_height",
+            _ => return Err(not("has no such cushion value")),
+        };
+        Ok(vec![format!("{CUSHION}.{field}")])
+    }
 }
 
 const S: &str = "form.Structure";
+const CUSHION: &str = "form.Cover.tuft.Cushion";
 const G: &str = "form.Structure.growth";
 
 const fn growth_name(growth: &Growth) -> &'static str {
@@ -341,6 +410,19 @@ mod tests {
         assert_eq!(paths(PlantLever::Radius, &moss), ["form.Cover.tuft.Cushion.radius"]);
         assert_eq!(paths(PlantLever::Height, &moss), ["form.Cover.tuft.Cushion.height"]);
         assert!(PlantLever::Lean.paths(&moss).is_err(), "a cushion has no blades");
+        assert_eq!(paths(PlantLever::Capsules, &moss), ["form.Cover.tuft.Cushion.capsules"]);
+        assert_eq!(paths(PlantLever::Flatness, &moss), ["form.Cover.tuft.Cushion.flatness"]);
+        assert_eq!(paths(PlantLever::CapsuleColor(2), &moss), ["form.Cover.tuft.Cushion.capsule_color.2"]);
+        assert_eq!(paths(PlantLever::TipColor(1), &moss), ["form.Cover.tip_color.1"]);
+        assert!(PlantLever::Sprawl.paths(&grass).is_err(), "grass is no cushion");
+        assert!(PlantLever::Bristles.paths(&oak).is_err(), "an oak is no cushion");
+        assert_eq!(paths(PlantLever::TipColor(0), &grass), ["form.Cover.tip_color.0"]);
+        // A cover that names no tip colour lightens its own.
+        let mut plain = grass.clone();
+        if let Form::Cover(c) = &mut plain.form {
+            c.tip_color = None;
+        }
+        assert!(PlantLever::TipColor(0).paths(&plain).is_err());
 
         // Placement applies to every species.
         for s in [&oak, &grass, &moss] {
@@ -381,6 +463,18 @@ mod tests {
             PlantLever::Dry,
             PlantLever::Lean,
             PlantLever::BladeCount,
+            PlantLever::TipColor(0),
+            PlantLever::Lumps,
+            PlantLever::Lobes,
+            PlantLever::Sprawl,
+            PlantLever::Flatness,
+            PlantLever::Shoulder,
+            PlantLever::Bristles,
+            PlantLever::BristleHeight,
+            PlantLever::BristleSplay,
+            PlantLever::Capsules,
+            PlantLever::CapsuleHeight,
+            PlantLever::CapsuleColor(0),
             PlantLever::Spacing,
             PlantLever::Probability,
         ];
@@ -391,6 +485,6 @@ mod tests {
                 assert!(lo >= 0.0 && lo.fract().abs() < f32::EPSILON && hi.fract().abs() < f32::EPSILON, "{lever:?}");
             }
         }
-        assert_eq!(all.iter().filter(|l| l.is_count()).count(), 3);
+        assert_eq!(all.iter().filter(|l| l.is_count()).count(), 6);
     }
 }

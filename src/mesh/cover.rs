@@ -6,7 +6,11 @@
 //!   little. Short blades get fewer segments than tall ones, the shortest
 //!   one: a cheap, dense understory.
 //! - Cushion: overlapping low mounds with lobed outlines (cushion moss,
-//!   lichen rosettes), optionally bristling with tiny shoots.
+//!   carpet moss, lichen rosettes), optionally bristling with tiny shoots
+//!   and fruiting: thin stalks above the shoots, each with a nodding
+//!   capsule. The mound profile, how far the mounds sprawl and how the
+//!   bristles stand are the species', so one mesher covers round domes,
+//!   flat mats and spiky haircap stands.
 //!
 //! Colour runs from a shaded root to a lighter tip (`Cover::shade`,
 //! `Cover::tip_color`), with a few dry blades, which is most of what makes
@@ -19,7 +23,8 @@
 //! Cost: a blade is `2 * segments + 1` vertices and `2 * segments - 1`
 //! triangles; a cushion mound `rings * sides + 1` vertices and
 //! `(2 * rings - 1) * sides` triangles (`lumps` mounds, each 2 rings in a
-//! cluster), plus 3 vertices and 1 triangle per bristle. Tufts are merged into one mesh per patch
+//! cluster), plus 3 vertices and 1 triangle per bristle and 11 vertices
+//! and 5 triangles per sporophyte. Tufts are merged into one mesh per patch
 //! (`MeshData::append_transformed`), so a patch is one draw however many
 //! tufts it holds.
 
@@ -86,11 +91,10 @@ const MIN_RIM: f32 = 0.4;
 /// The rim sits this many mound heights below the ground, so a cushion on
 /// a slope shows no gap.
 const RIM_SINK: f32 = 0.15;
-/// A mound's profile: `(1 - rho^FLAT_TOP)^SHOULDER` of its height at `rho`
-/// from the centre. Higher `FLAT_TOP`, a flatter top...
-const FLAT_TOP: f32 = 2.5;
-/// ...and lower `SHOULDER`, a steeper drop to the rim.
-const SHOULDER: f32 = 0.6;
+/// The lowest `Tuft::Cushion::flatness`: under it a mound is a spike.
+const MIN_FLATNESS: f32 = 0.5;
+/// The lowest `Tuft::Cushion::shoulder`: at 0 a mound is a drum.
+const MIN_SHOULDER: f32 = 0.05;
 /// A cluster's outer mounds sit this far out, as a fraction of the
 /// cushion's radius.
 const LUMP_DISTANCE: (f32, f32) = (0.3, 0.6);
@@ -128,8 +132,6 @@ const BRISTLE_ROOT_DEPTH: f32 = 0.12;
 /// How far a bristle wanders from leaning straight out, horizontally per
 /// unit of height.
 const BRISTLE_WANDER: f32 = 0.3;
-/// How far bristles at the rim lean out, per unit of height.
-const BRISTLE_SPLAY: f32 = 1.2;
 /// Each bristle's height is `bristle_height` times a draw from this range.
 const BRISTLE_HEIGHT_JITTER: (f32, f32) = (0.6, 1.4);
 /// A bristle's base is this many times its height across.
@@ -138,6 +140,32 @@ const BRISTLE_WIDTH: f32 = 0.09;
 const BRISTLE_NORMAL_UP: f32 = 0.7;
 /// A bristle's tip is this many times brighter than its base.
 const BRISTLE_TIP_LIGHT: f32 = 1.1;
+
+/// Sporophytes stand within this fraction of the way out to the rim.
+const CAPSULE_SPAN: f32 = 0.75;
+/// Each variant fruits with `capsules` times a draw from this range.
+const CAPSULE_SHARE: (f32, f32) = (0.0, 2.0);
+/// Each stalk's height is `capsule_height` times a draw from this range.
+const STALK_HEIGHT_JITTER: (f32, f32) = (0.7, 1.3);
+/// How far a stalk leans from upright, horizontally per unit of height, at
+/// most.
+const STALK_LEAN: f32 = 0.25;
+/// A stalk's base is this many times its height across.
+const STALK_WIDTH: f32 = 0.025;
+/// A stalk's base is this share of its capsule's brightness.
+const STALK_BASE_SHADE: f32 = 0.6;
+/// A capsule is this many times its stalk's height long...
+const CAPSULE_LENGTH: f32 = 0.14;
+/// ...and this many times its own length across, widest...
+const CAPSULE_GIRTH: f32 = 0.4;
+/// ...this share of the way from its neck to its tip.
+const CAPSULE_WIDEST: f32 = 0.55;
+/// How far a capsule nods over from its stalk, radians: from tilted to
+/// hanging past level.
+const CAPSULE_NOD: (f32, f32) = (0.5, 1.8);
+/// The wind weight up the plant at a capsule: stalks sway more than the
+/// cushion under them.
+const CAPSULE_SWAY: f32 = 0.6;
 
 /// One tuft of `cover` at `lod`, centred on the origin, +Y up.
 #[must_use]
@@ -150,8 +178,24 @@ pub fn tuft(cover: &Cover, lod: PlantLod, seed: u64) -> MeshData {
             let clump = Clump { count, height, width, lean, segments, spread, height_jitter, splay };
             blades(&mut out, &clump, lod, &paint, &mut rng, seed);
         }
-        Tuft::Cushion { radius, height, sides, lumps, lobes, bristles, bristle_height } => {
-            let mounds = cluster(radius, height, lumps, lobes, lod, &mut rng);
+        Tuft::Cushion {
+            radius,
+            height,
+            sides,
+            lumps,
+            lobes,
+            bristles,
+            bristle_height,
+            bristle_splay,
+            flatness,
+            shoulder,
+            sprawl,
+            capsules,
+            capsule_height,
+            ..
+        } => {
+            let profile = Profile { flatness: flatness.max(MIN_FLATNESS), shoulder: shoulder.max(MIN_SHOULDER) };
+            let mounds = cluster(&Cluster { radius, height, lumps, lobes, sprawl, profile }, lod, &mut rng);
             let sides = match lod {
                 PlantLod::Hero => u32::from(sides).max(MIN_RIM_SIDES),
                 PlantLod::Near => u32::from(sides).max(MIN_RIM_SIDES).div_ceil(2).max(MIN_RIM_SIDES),
@@ -170,8 +214,10 @@ pub fn tuft(cover: &Cover, lod: PlantLod, seed: u64) -> MeshData {
             for b in 0..bristles {
                 let pick = usize_from(b).checked_rem(mounds.len()).unwrap_or(0);
                 let Some(m) = mounds.get(pick) else { break };
-                bristle(&mut out, m, bristle_height * height, top, &paint, &mut rng, hash_unit(seed, u64::from(b)));
+                let phase = hash_unit(seed, u64::from(b));
+                bristle(&mut out, m, (bristle_height * height, bristle_splay), top, &paint, &mut rng, phase);
             }
+            fruit(&mut out, &mounds, capsules, capsule_height * height, lod, &paint, seed);
         }
     }
     out
@@ -183,6 +229,8 @@ struct Paint {
     tip: LinearRgba,
     dry_root: LinearRgba,
     dry_tip: LinearRgba,
+    /// Sporophyte stalks and capsules.
+    capsule: LinearRgba,
     jitter: f32,
     dry: f32,
     /// Planar UVs per metre on cushions, for the detail speckle.
@@ -201,6 +249,10 @@ impl Paint {
             tip,
             dry_root: mix(root, scale(dry, 1.0 - cover.shade), 1.0 - DRY_ROOT_GREEN),
             dry_tip: dry,
+            capsule: match cover.tuft {
+                Tuft::Cushion { capsule_color, .. } => srgb(capsule_color),
+                Tuft::Blades { .. } => base,
+            },
             jitter: cover.color_jitter,
             dry: cover.dry,
             uv_per_m: (cover.detail_size.max(1e-4) * f32_from_u32(DETAIL_CELLS)).recip(),
@@ -357,21 +409,30 @@ fn blade(out: &mut MeshData, b: &Blade, paint: &Paint) {
     }
 }
 
-/// One mound of a cushion: a flat-topped dome with a lobed rim.
+/// A mound's profile: `(1 - rho^flatness)^shoulder` of its height at `rho`
+/// from the centre (`Tuft::Cushion::flatness`).
+#[derive(Clone, Copy)]
+struct Profile {
+    flatness: f32,
+    shoulder: f32,
+}
+
+/// One mound of a cushion: a dome with a lobed rim.
 struct Mound {
     centre: Vec2,
     radius: f32,
     height: f32,
+    profile: Profile,
     /// `(amplitude, frequency, phase)` of the rim's lobes.
     lobes: [(f32, f32, f32); 3],
 }
 
 impl Mound {
-    fn new(centre: Vec2, radius: f32, height: f32, lobes: f32, rng: &mut PlantRng) -> Self {
+    fn new(centre: Vec2, radius: f32, height: f32, lobes: f32, profile: Profile, rng: &mut PlantRng) -> Self {
         let lobes = RIM_WAVES.map(|(amp, freq)| {
             (amp * lobes * rng.range(WAVE_JITTER.0, WAVE_JITTER.1), freq, rng.range(0.0, std::f32::consts::TAU))
         });
-        Self { centre, radius, height, lobes }
+        Self { centre, radius, height, profile, lobes }
     }
 
     /// Rim radius at angle `a`.
@@ -385,21 +446,34 @@ impl Mound {
     /// slope.
     fn point(&self, rho: f32, a: f32) -> Vec3 {
         let flat = self.centre + Vec2::new(a.cos(), a.sin()) * (self.rim(a) * rho);
-        // Flat-topped, then rounding steeply down to the rim.
+        // Flat-topped or domed, then rounding down to the rim.
+        let Profile { flatness, shoulder } = self.profile;
         let y = if rho >= 1.0 {
             -RIM_SINK * self.height
         } else {
-            (1.0 - rho.clamp(0.0, 1.0).powf(FLAT_TOP)).max(0.0).powf(SHOULDER) * self.height
+            (1.0 - rho.clamp(0.0, 1.0).powf(flatness)).max(0.0).powf(shoulder) * self.height
         };
         Vec3::new(flat.x, y, flat.y)
     }
+}
+
+/// What [`cluster`] builds a cushion's mounds from: its size, lumps and
+/// outline, from `Tuft::Cushion`.
+struct Cluster {
+    radius: f32,
+    height: f32,
+    lumps: u8,
+    lobes: f32,
+    sprawl: f32,
+    profile: Profile,
 }
 
 /// The mounds a cushion is built from: `lumps` overlapping shoot clumps,
 /// the tallest near the middle, or one mound (`lumps` 0 or 1, and always
 /// at the far tier). Where they meet they crease, and their dark rims
 /// show as the hollows between clumps.
-fn cluster(radius: f32, height: f32, lumps: u8, lobes: f32, lod: PlantLod, rng: &mut PlantRng) -> Vec<Mound> {
+fn cluster(spec: &Cluster, lod: PlantLod, rng: &mut PlantRng) -> Vec<Mound> {
+    let Cluster { radius, height, lumps, lobes, sprawl, profile } = *spec;
     let kept = match lod {
         PlantLod::Hero => lumps,
         PlantLod::Near => lumps.div_ceil(2),
@@ -409,20 +483,22 @@ fn cluster(radius: f32, height: f32, lumps: u8, lobes: f32, lod: PlantLod, rng: 
     let all: Vec<Mound> = (0..lumps.max(1))
         .map(|i| {
             if lumps <= 1 {
-                return Mound::new(Vec2::ZERO, radius, height, lobes, rng);
+                return Mound::new(Vec2::ZERO, radius, height, lobes, profile, rng);
             }
             let a = rng.range(0.0, std::f32::consts::TAU);
             let d = if i == 0 { 0.0 } else { rng.range(LUMP_DISTANCE.0, LUMP_DISTANCE.1) };
+            // Taper and slope by the usual distance, so a sprawling cushion's
+            // outer mounds stand as tall as a tight one's.
             let r = radius * rng.range(LUMP_RADIUS.0, LUMP_RADIUS.1) * d.mul_add(-LUMP_TAPER, 1.0);
             let h = height * rng.range(LUMP_HEIGHT.0, LUMP_HEIGHT.1) * d.mul_add(-LUMP_SLOPE, LUMP_PEAK);
-            Mound::new(Vec2::new(a.cos(), a.sin()) * (radius * d), r, h, lobes * LUMP_LOBES, rng)
+            Mound::new(Vec2::new(a.cos(), a.sin()) * (radius * d * sprawl), r, h, lobes * LUMP_LOBES, profile, rng)
         })
         .collect();
     if kept <= 1 && lumps > 1 {
         // One mound standing in for the cluster: its footprint, its height.
         let foot = all.iter().map(|m| m.radius.mul_add(STAND_IN_REACH, m.centre.length())).fold(0.0, f32::max);
         let h = all.iter().map(|m| m.height).fold(0.0, f32::max) * STAND_IN_HEIGHT;
-        return vec![Mound::new(Vec2::ZERO, foot.min(radius), h, lobes, rng)];
+        return vec![Mound::new(Vec2::ZERO, foot.min(radius * sprawl.max(1.0)), h, lobes, profile, rng)];
     }
     all.into_iter().take(usize::from(kept.max(1))).collect()
 }
@@ -497,14 +573,14 @@ fn smooth_normals(out: &mut MeshData, first: u32) {
 }
 
 /// One shoot standing out of the cushion: a single thin triangle, leaning
-/// out with the surface.
-fn bristle(out: &mut MeshData, m: &Mound, height: f32, top: f32, paint: &Paint, rng: &mut PlantRng, phase: f32) {
+/// out with the surface by `splay` per unit of its height at the rim.
+fn bristle(out: &mut MeshData, m: &Mound, (height, splay): (f32, f32), top: f32, paint: &Paint, rng: &mut PlantRng, phase: f32) {
     let rho = rng.unit().sqrt() * BRISTLE_SPAN;
     let a = rng.range(0.0, std::f32::consts::TAU);
     let root = m.point(rho, a) - Vec3::Y * (m.height * BRISTLE_ROOT_DEPTH);
     let out_dir = Vec3::new(a.cos(), 0.0, a.sin());
     let wander = Vec3::new(rng.signed(), 0.0, rng.signed()) * BRISTLE_WANDER;
-    let up = (Vec3::Y + out_dir * (rho * rho * BRISTLE_SPLAY) + wander).normalize_or(Vec3::Y);
+    let up = (Vec3::Y + out_dir * (rho * rho * splay) + wander).normalize_or(Vec3::Y);
     let h = height * rng.range(BRISTLE_HEIGHT_JITTER.0, BRISTLE_HEIGHT_JITTER.1);
     let side = Vec3::new(rng.signed(), 0.0, rng.signed());
     let across = up.cross(side).normalize_or(Vec3::X) * (h * BRISTLE_WIDTH);
@@ -518,6 +594,72 @@ fn bristle(out: &mut MeshData, m: &Mound, height: f32, top: f32, paint: &Paint, 
     let a1 = out.vertex(root + across, normal, uv, wind, Some(paint.at(t0, dry, k)));
     let tip = out.vertex(root + up * h, normal, uv, wind, Some(paint.at(1.0, dry, k * BRISTLE_TIP_LIGHT)));
     out.triangle(a0, a1, tip);
+}
+
+/// A cushion's sporophytes: each variant draws how many it has from
+/// `capsules` (see `Tuft::Cushion::capsules`), on its own stream, so every
+/// tier keeps the same ones.
+fn fruit(out: &mut MeshData, mounds: &[Mound], capsules: u16, height: f32, lod: PlantLod, paint: &Paint, seed: u64) {
+    let mut rng = PlantRng::fork(seed, "capsules");
+    let all = u32_from_f32((f32::from(capsules) * rng.range(CAPSULE_SHARE.0, CAPSULE_SHARE.1)).round());
+    let kept = match lod {
+        PlantLod::Hero => all,
+        PlantLod::Near => all.div_ceil(4),
+        PlantLod::Far => 0,
+    };
+    let top = mounds.iter().map(|m| m.height).fold(1e-4, f32::max);
+    for i in 0..kept {
+        let pick = usize_from(i).checked_rem(mounds.len()).unwrap_or(0);
+        let Some(mound) = mounds.get(pick) else { break };
+        sporophyte(out, mound, height, top, paint, &mut rng);
+    }
+}
+
+/// One sporophyte: a thin stalk out of the shoots (one triangle) with a
+/// nodding capsule on top (two crossed diamonds, so it reads as round from
+/// any side).
+fn sporophyte(out: &mut MeshData, mound: &Mound, height: f32, top: f32, paint: &Paint, rng: &mut PlantRng) {
+    let phase = rng.unit();
+    let rho = rng.unit().sqrt() * CAPSULE_SPAN;
+    let a = rng.range(0.0, std::f32::consts::TAU);
+    let root = mound.point(rho, a) - Vec3::Y * (mound.height * BRISTLE_ROOT_DEPTH);
+    let lean = Vec3::new(rng.signed(), 0.0, rng.signed()) * STALK_LEAN;
+    let up = (Vec3::Y + lean).normalize_or(Vec3::Y);
+    let stalk = height * rng.range(STALK_HEIGHT_JITTER.0, STALK_HEIGHT_JITTER.1);
+    let neck = root + up * stalk;
+    let k = rng.signed().mul_add(paint.jitter, 1.0);
+    let color = |shade: f32| {
+        let c = scale(paint.capsule, k * shade);
+        Vec4::new(c.red, c.green, c.blue, 1.0)
+    };
+    let uv = root.xz() * paint.uv_per_m;
+    let sway = |t: f32| Vec4::new(t.mul_add(CAPSULE_SWAY, (root.y / top.max(1e-4)).clamp(0.0, 1.0) * CUSHION_SWAY), 1.0, phase, 1.0);
+    let lit = |n: Vec3| n.normalize_or(Vec3::Y).lerp(Vec3::Y, NORMAL_UP).normalize_or(Vec3::Y);
+
+    // The stalk: a sliver from the shoots to the capsule's neck.
+    let across = up.cross(Vec3::new(a.cos(), 0.0, a.sin())).normalize_or(Vec3::X) * (stalk * STALK_WIDTH);
+    let normal = lit(up.cross(across));
+    let s0 = out.vertex(root - across, normal, uv, sway(0.0), Some(color(STALK_BASE_SHADE)));
+    let s1 = out.vertex(root + across, normal, uv, sway(0.0), Some(color(STALK_BASE_SHADE)));
+    let s2 = out.vertex(neck, normal, uv, sway(1.0), Some(color(1.0)));
+    out.triangle(s0, s1, s2);
+
+    // The capsule, nodding over to one side.
+    let side = up.cross(Vec3::new(rng.signed(), 0.0, rng.signed())).normalize_or(Vec3::X);
+    let axis = Quat::from_axis_angle(side, rng.range(CAPSULE_NOD.0, CAPSULE_NOD.1)) * up;
+    let length = stalk * CAPSULE_LENGTH;
+    let tip = neck + axis * length;
+    let widest = neck + axis * (length * CAPSULE_WIDEST);
+    let half = length * CAPSULE_GIRTH * 0.5;
+    let across = axis.cross(Vec3::Y).normalize_or(Vec3::X);
+    for across in [across, axis.cross(across).normalize_or(Vec3::Z)] {
+        let neck_v = out.vertex(neck, lit(-axis), uv, sway(1.0), Some(color(1.0)));
+        let left = out.vertex(widest - across * half, lit(-across), uv, sway(1.0), Some(color(1.0)));
+        let tip_v = out.vertex(tip, lit(axis), uv, sway(1.0), Some(color(1.0)));
+        let right = out.vertex(widest + across * half, lit(across), uv, sway(1.0), Some(color(1.0)));
+        out.triangle(neck_v, left, tip_v);
+        out.triangle(neck_v, tip_v, right);
+    }
 }
 
 /// Texels across the detail texture.
@@ -659,8 +801,37 @@ mod tests {
         }
     }
 
+    /// A 0.1 m cushion, 0.04 m tall, with the species defaults for the rest.
+    fn shape(sides: u8, lumps: u8, lobes: f32, bristles: u16) -> Tuft {
+        Tuft::Cushion {
+            radius: 0.1,
+            height: 0.04,
+            sides,
+            lumps,
+            lobes,
+            bristles,
+            bristle_height: 0.4,
+            bristle_splay: 1.2,
+            flatness: 2.5,
+            shoulder: 0.6,
+            sprawl: 1.0,
+            capsules: 0,
+            capsule_height: 2.5,
+            capsule_color: [0.42, 0.2, 0.08],
+        }
+    }
+
     fn cushion(lumps: u8, bristles: u16) -> Cover {
-        cover(Tuft::Cushion { radius: 0.1, height: 0.04, sides: 8, lumps, lobes: 0.0, bristles, bristle_height: 0.4 })
+        cover(shape(8, lumps, 0.0, bristles))
+    }
+
+    /// `cushion(3, 0)` with `edit` applied to its fields.
+    fn cushion_with(edit: impl FnOnce(&mut f32, &mut f32, &mut f32, &mut u16)) -> Cover {
+        let mut c = cushion(3, 0);
+        if let Tuft::Cushion { flatness, shoulder, sprawl, capsules, .. } = &mut c.tuft {
+            edit(flatness, shoulder, sprawl, capsules);
+        }
+        c
     }
 
     fn grass(count: u8, segments: u8, height_jitter: f32) -> Cover {
@@ -677,13 +848,16 @@ mod tests {
 
     #[test]
     fn lumpy_cushions_stay_in_bounds() {
-        let c = cover(Tuft::Cushion { radius: 0.1, height: 0.04, sides: 10, lumps: 6, lobes: 0.4, bristles: 20, bristle_height: 0.5 });
+        let mut c = cover(shape(10, 6, 0.4, 20));
+        if let Tuft::Cushion { sprawl, capsules, flatness, shoulder, .. } = &mut c.tuft {
+            (*sprawl, *capsules, *flatness, *shoulder) = (1.6, 6, 6.0, 0.3);
+        }
         for seed in 0..20 {
             let m = tuft(&c, PlantLod::Hero, seed);
             assert!(m.indices.iter().all(|&i| i < m.vertex_count()));
             for p in &m.positions {
                 assert!(p.iter().all(|v| v.is_finite()));
-                assert!(Vec2::new(p[0], p[2]).length() < 0.2 && p[1] < 0.2 && p[1] > -0.02, "{p:?}");
+                assert!(Vec2::new(p[0], p[2]).length() < 0.25 && p[1] < 0.2 && p[1] > -0.02, "{p:?}");
             }
         }
     }
@@ -698,6 +872,41 @@ mod tests {
         let moss = cushion(5, 24);
         let [h, n, f] = PlantLod::ALL.map(|lod| tuft(&moss, lod, 1).indices.len());
         assert!(f < n && n < h, "{h} {n} {f}");
+    }
+
+    #[test]
+    fn flatter_mounds_hold_their_height_further_out() {
+        let mean_y = |c: &Cover| {
+            let m = tuft(c, PlantLod::Hero, 4);
+            m.positions.iter().map(|p| p[1]).sum::<f32>() / f32_from_usize(m.positions.len())
+        };
+        let dome = mean_y(&cushion_with(|f, s, _, _| (*f, *s) = (1.2, 1.0)));
+        let mat = mean_y(&cushion_with(|f, s, _, _| (*f, *s) = (6.0, 0.3)));
+        assert!(mat > dome, "{mat} {dome}");
+    }
+
+    #[test]
+    fn sprawling_cushions_spread_wider() {
+        let reach = |c: &Cover| {
+            (0..10).map(|seed| tuft(c, PlantLod::Hero, seed)).flat_map(|m| m.positions).map(|p| Vec2::new(p[0], p[2]).length()).fold(0.0, f32::max)
+        };
+        assert!(reach(&cushion_with(|_, _, s, _| *s = 2.0)) > reach(&cushion_with(|_, _, s, _| *s = 0.5)));
+    }
+
+    #[test]
+    fn some_variants_fruit_and_far_tiers_drop_it() {
+        let bare = cushion(3, 0);
+        let fruiting = cushion_with(|_, _, _, n| *n = 4);
+        let extra = |seed, lod| tuft(&fruiting, lod, seed).indices.len() - tuft(&bare, lod, seed).indices.len();
+        let hero: Vec<usize> = (0..12).map(|seed| extra(seed, PlantLod::Hero) / 3).collect();
+        assert!(hero.iter().all(|t| t % 5 == 0), "five triangles a sporophyte: {hero:?}");
+        // Each variant draws its own count: a stand is part fruiting.
+        assert!(hero.iter().collect::<std::collections::HashSet<_>>().len() > 1, "{hero:?}");
+        assert!(hero.iter().any(|&t| t > 0), "{hero:?}");
+        for seed in 0..12 {
+            assert!(extra(seed, PlantLod::Near) <= extra(seed, PlantLod::Hero));
+            assert_eq!(extra(seed, PlantLod::Far), 0);
+        }
     }
 
     #[test]

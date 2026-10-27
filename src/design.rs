@@ -74,7 +74,7 @@ pub enum DesignError {
 
 /// How elaborate a plant is, for budgets: the stem nodes and organs (leaves,
 /// flowers, fruit) of one grown variant, or a cover's blades or a cushion's
-/// mounds and bristles.
+/// mounds, bristles and mean sporophytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Complexity {
     /// Stem nodes, or a cushion's mounds.
@@ -95,7 +95,9 @@ impl Complexity {
             }
             Form::Cover(c) => match c.tuft {
                 Tuft::Blades { count, .. } => Self { nodes: 0, organs: usize::from(count) },
-                Tuft::Cushion { lumps, bristles, .. } => Self { nodes: usize::from(lumps), organs: usize::from(bristles) },
+                Tuft::Cushion { lumps, bristles, capsules, .. } => {
+                    Self { nodes: usize::from(lumps), organs: usize::from(bristles).saturating_add(usize::from(capsules)) }
+                }
             },
         }
     }

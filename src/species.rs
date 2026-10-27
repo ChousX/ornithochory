@@ -309,6 +309,38 @@ pub enum Tuft {
         /// Bristle height as a fraction of `height`.
         #[serde(default = "default_bristle_height")]
         bristle_height: f32,
+        /// How far bristles near the rim lean out, per unit of their height:
+        /// 0 all upright (haircap moss), 1.2 splayed like a pincushion.
+        #[serde(default = "default_bristle_splay")]
+        bristle_splay: f32,
+        /// A mound's profile is `(1 - rho^flatness)^shoulder` of its height
+        /// at `rho` from its centre, out to its rim. Higher `flatness`, a
+        /// flatter top: 1.5 a round dome (cushion moss), 5 a flat mat
+        /// (carpet moss).
+        #[serde(default = "default_flatness")]
+        flatness: f32,
+        /// See `flatness`. Lower, a steeper drop to the rim: 0.3 a mat with
+        /// a sheer edge, 1 a gentle cone.
+        #[serde(default = "default_shoulder")]
+        shoulder: f32,
+        /// How far a cluster's outer mounds spread from its middle, as a
+        /// multiple of the usual: under 1 a tight cushion, 2 a sprawling
+        /// carpet of separate clumps.
+        #[serde(default = "default_sprawl")]
+        sprawl: f32,
+        /// Sporophytes per cushion on average: thin stalks (setae) standing
+        /// above the shoots, each with a nodding capsule. Each variant
+        /// draws its own number from none to twice this, so some cushions
+        /// of a stand are fruiting and some are bare. A quarter of them at
+        /// the near tier, none at far.
+        #[serde(default)]
+        capsules: u16,
+        /// Stalk height as a multiple of `height`.
+        #[serde(default = "default_capsule_height")]
+        capsule_height: f32,
+        /// sRGB colour of the stalks and capsules.
+        #[serde(default = "default_capsule_color")]
+        capsule_color: [f32; 3],
     },
 }
 
@@ -326,6 +358,30 @@ const fn default_lobes() -> f32 {
 
 const fn default_bristle_height() -> f32 {
     0.4
+}
+
+const fn default_bristle_splay() -> f32 {
+    1.2
+}
+
+const fn default_flatness() -> f32 {
+    2.5
+}
+
+const fn default_shoulder() -> f32 {
+    0.6
+}
+
+const fn default_sprawl() -> f32 {
+    1.0
+}
+
+const fn default_capsule_height() -> f32 {
+    2.5
+}
+
+const fn default_capsule_color() -> [f32; 3] {
+    [0.42, 0.2, 0.08]
 }
 
 /// Where a species grows.
