@@ -41,8 +41,8 @@ bevy = { version = "0.20", default-features = false, features = [
     "serialize",
 ] }
 fastnoise-lite = "1.1"
-# Local until its `traits` branch is pushed.
-genetics = { path = "../genetics", optional = true }
+# The `traits` branch, until it lands on master.
+genetics = { git = "https://github.com/ChousX/genetics", branch = "traits", optional = true }
 ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
