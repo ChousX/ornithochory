@@ -1,0 +1,32 @@
+// Moss as DNA: the cushion moss as founder, with every trait that tells
+// one moss from another free to vary. Its range runs from tight domes to
+// flat sprawling carpets, from smooth mats to bristling haircap stands,
+// bare or fruiting, yellow-green to near black-green. The shapes and
+// colours of the bundled `carpet-moss` and `haircap-moss` are both inside
+// it.
+(
+    species: "species/moss.plant.ron",
+    traits: [
+        Lever(lever: Radius, range: (0.12, 0.45)),
+        Lever(lever: Height, range: (0.015, 0.09)),
+        Lever(lever: Lumps, range: (1.0, 8.0)),
+        Lever(lever: Lobes, range: (0.1, 0.5)),
+        Lever(lever: Sprawl, range: (0.6, 2.0)),
+        Lever(lever: Flatness, range: (1.2, 6.0)),
+        Lever(lever: Shoulder, range: (0.3, 1.0)),
+        Lever(lever: Bristles, range: (0.0, 40.0)),
+        Lever(lever: BristleHeight, range: (0.3, 1.0)),
+        Lever(lever: BristleSplay, range: (0.2, 1.8)),
+        Lever(lever: Capsules, range: (0.0, 6.0)),
+        Lever(lever: CapsuleHeight, range: (1.2, 4.0)),
+        Lever(lever: CapsuleColor(0), range: (0.25, 0.6)),
+        Lever(lever: CapsuleColor(1), range: (0.1, 0.35)),
+        Lever(lever: CoverColor(0), range: (0.04, 0.24)),
+        Lever(lever: CoverColor(1), range: (0.1, 0.26)),
+        Lever(lever: CoverColor(2), range: (0.02, 0.1)),
+        Lever(lever: TipColor(0), range: (0.15, 0.45)),
+        Lever(lever: TipColor(1), range: (0.2, 0.45)),
+        Lever(lever: TipColor(2), range: (0.05, 0.16)),
+        Lever(lever: Dry, range: (0.0, 0.3)),
+    ],
+)

@@ -1,6 +1,6 @@
 //! Every bundled species on a flat plane: a row of each stemmed species and
-//! patches of grass and moss scattered around them. A ball rolls through
-//! the shrubs to show interaction.
+//! patches of grass and three mosses scattered around them. A ball rolls
+//! through the shrubs to show interaction.
 //!
 //! `cargo run --release --example grove`. Arrow keys orbit, W/S zoom.
 //! `grove-live` (devenv) runs it under `dx serve --hot-patch` from `live/`,
@@ -38,13 +38,15 @@ use ornithochory::prelude::*;
 const SPECIES: [&str; 4] = ["oak", "spruce", "bush", "fern"];
 
 /// Shot name, orbit target, yaw, pitch, distance.
-const VIEWS: [(&str, Vec3, f32, f32, f32); 9] = [
+const VIEWS: [(&str, Vec3, f32, f32, f32); 10] = [
     ("overview", Vec3::new(0.0, 2.0, 0.0), 0.6, 0.35, 28.0),
     ("oak", Vec3::new(0.0, 4.5, 9.0), 0.3, 0.15, 13.0),
     ("spruce", Vec3::new(0.0, 4.5, 3.0), 2.75, 0.12, 13.0),
     ("bush", Vec3::new(0.0, 0.7, -3.0), 0.5, 0.35, 4.5),
     ("fern", Vec3::new(0.0, 0.3, -9.0), 0.2, 0.55, 2.6),
     ("ground", Vec3::new(4.0, 0.1, -14.0), 0.9, 0.18, 2.2),
+    // Where all three mosses grow, with no grass to hide them.
+    ("moss", Vec3::new(1.0, 0.05, 23.0), 0.4, 0.5, 1.1),
     // From -Z, so Hero (largest x) is on the left.
     ("tiers_trees", Vec3::new(0.0, 4.0, -20.0), std::f32::consts::PI, 0.1, 30.0),
     ("tiers_small", Vec3::new(0.0, 0.6, -28.0), std::f32::consts::PI, 0.25, 9.0),
@@ -185,7 +187,7 @@ fn setup(
         }
     }
 
-    commands.insert_resource(CoverSpecies(["grass", "moss"].map(|n| assets.load(format!("species/{n}.plant.ron"))).to_vec()));
+    commands.insert_resource(CoverSpecies(["grass", "moss", "carpet-moss", "haircap-moss"].map(|n| assets.load(format!("species/{n}.plant.ron"))).to_vec()));
 
     commands.spawn((
         Ball,

@@ -63,7 +63,9 @@ low-end hardware.
 Bundled in `assets/species/`: `oak` (space colonization), `spruce`
 (Weber-Penn style recursion: a leader with whorls of branches), `fern` and
 `bush` (parametric L-systems, see `src/grow/lsystem.rs` for the symbols),
-`grass` and `moss` (cover).
+`grass`, and three mosses from the one cushion tuft (cover): domed `moss`,
+flat, sprawling `carpet-moss` and bristling `haircap-moss`, whose cushions
+fruit with stalked, nodding capsules.
 
 ## Use
 
@@ -163,6 +165,11 @@ Everything else in the species is a fixed gene that mutation never
 touches. A genome is a strain, not a single plant: every plant grown from
 it shares its cached variants. `Complexity::of` counts what one variant
 costs (stem nodes and organs), for budgets.
+
+`assets/designs/moss.plant-design.ron` is a worked example: the cushion
+moss with every trait that tells one moss from another free to vary (size,
+mounds, profile, sprawl, bristles, sporophytes, colours), wide enough to
+hold both of the other bundled mosses.
 
 ## Examples
 

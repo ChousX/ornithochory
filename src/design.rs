@@ -241,7 +241,7 @@ mod tests {
         ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
-    const ALL: [&str; 6] = ["oak", "spruce", "bush", "fern", "grass", "moss"];
+    const ALL: [&str; 8] = ["oak", "spruce", "bush", "fern", "grass", "moss", "carpet-moss", "haircap-moss"];
 
     #[test]
     fn every_species_round_trips_through_dna() {
@@ -288,6 +288,65 @@ mod tests {
             let size = Complexity::of(&s);
             assert!(size.nodes > 0 && size.nodes < caps.nodes * 4, "{size:?} against {caps:?}");
         }
+    }
+
+    /// The bundled `*.plant-design.ron` files, as the loader reads them.
+    fn designs() -> Vec<(String, PlantDesign)> {
+        let dir = format!("{}/assets/designs", env!("CARGO_MANIFEST_DIR"));
+        let mut out: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| {
+                let name = e.unwrap().file_name().into_string().unwrap();
+                let stem = name.strip_suffix(".plant-design.ron")?.to_string();
+                let path = format!("{}/assets/designs/{name}", env!("CARGO_MANIFEST_DIR"));
+                let file: DesignFile = ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+                let named = file.species.strip_prefix("species/").and_then(|s| s.strip_suffix(".plant.ron")).unwrap();
+                Some((stem, PlantDesign { species: species(named), traits: file.traits }))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    #[test]
+    fn bundled_designs_breed_and_grow() {
+        let all = designs();
+        assert!(all.iter().any(|(n, _)| n == "moss"));
+        let mut rng = Pcg64Mcg::seed_from_u64(11);
+        for (name, design) in all {
+            let founder = design.founder().unwrap_or_else(|e| panic!("{name}: {e}"));
+            let mut seen = Vec::new();
+            for _ in 0..30 {
+                let mutant = founder.mutant(0.3, &mut rng);
+                let s = express(&mutant).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let v = crate::generate::generate(&s, 0);
+                let hero = &v.tiers[0].foliage;
+                assert!(!hero.indices.is_empty() && hero.positions.iter().flatten().all(|c| c.is_finite()), "{name}");
+                assert!(v.radius > 0.0 && v.radius < 2.0, "{name}: radius {}", v.radius);
+                seen.push(s);
+            }
+            seen.dedup();
+            assert!(seen.len() > 20, "{name}: mutants should differ, {} distinct", seen.len());
+        }
+    }
+
+    #[test]
+    fn moss_mutants_stay_in_range() {
+        let (_, moss) = designs().into_iter().find(|(n, _)| n == "moss").unwrap();
+        let founder = moss.founder().unwrap();
+        let mut rng = Pcg64Mcg::seed_from_u64(3);
+        let (mut fruiting, mut flat) = (0, 0);
+        for _ in 0..100 {
+            let s = express(&founder.mutant(0.3, &mut rng)).unwrap();
+            let Form::Cover(c) = &s.form else { panic!() };
+            let Tuft::Cushion { lumps, flatness, sprawl, capsules, bristles, .. } = c.tuft else { panic!() };
+            assert!((1..=8).contains(&lumps) && (0..=40).contains(&bristles) && capsules <= 6);
+            assert!((1.2..=6.0).contains(&flatness) && (0.6..=2.0).contains(&sprawl));
+            fruiting += usize::from(capsules > 0);
+            flat += usize::from(flatness > 4.0);
+        }
+        // A rate of 0.3 reaches well past the founder's bare, domed cushion.
+        assert!(fruiting > 10 && flat > 5, "{fruiting} fruiting, {flat} flat");
     }
 
     #[test]

@@ -748,7 +748,7 @@ mod tests {
         use crate::scatter::{GroundHit, scatter, species_seed};
         let flat = |p: Vec2| Some(GroundHit { pos: Vec3::new(p.x, 0.0, p.y), normal: Vec3::Y, material: None });
         let mut total = [0usize; 3];
-        for name in ["grass", "moss"] {
+        for name in ["grass", "moss", "carpet-moss", "haircap-moss"] {
             let s = bundled(name);
             let mut tris = [0usize; 3];
             let mut verts = 0usize;

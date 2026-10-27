@@ -1,0 +1,40 @@
+// Carpet moss (feather moss, Hypnum and kin) as cover: wide, flat mats of
+// low mounds sprawling into each other, with sheer little edges and a few
+// splayed shoots at the rim. Yellow-green, lighter than cushion moss, and
+// thinner at the edge of a stand, where it browns.
+(
+    name: "carpet-moss",
+    variants: 6,
+    form: Cover((
+        tuft: Cushion(
+            radius: 0.28,
+            height: 0.028,
+            sides: 9,
+            lumps: 6,
+            lobes: 0.5,
+            bristles: 18,
+            bristle_height: 0.5,
+            bristle_splay: 1.6,
+            flatness: 4.0,
+            shoulder: 0.45,
+            sprawl: 1.4,
+        ),
+        color: (0.12, 0.15, 0.04),
+        tip_color: Some((0.25, 0.28, 0.07)),
+        shade: 0.4,
+        color_jitter: 0.25,
+        dry: 0.12,
+        dry_color: (0.5, 0.4, 0.18),
+        detail: 0.55,
+        detail_size: 0.004,
+    )),
+    placement: (
+        spacing: 0.45,
+        probability: 0.8,
+        slope: (0.0, 45.0),
+        noise: Some((frequency: 0.11, threshold: 0.35, octaves: 3)),
+        align: 1.0,
+        scale: (0.6, 1.4),
+        sink: 0.008,
+    ),
+)

@@ -1,0 +1,43 @@
+// Haircap moss (Polytrichum) as cover: tight, tall cushions bristling with
+// upright shoots, dark green under lighter star-shaped tips, and in some
+// stands fruiting: red-brown stalks well above the shoots, each with a
+// nodding capsule. Shoots stand up rather than follow a slope.
+(
+    name: "haircap-moss",
+    variants: 6,
+    form: Cover((
+        tuft: Cushion(
+            radius: 0.16,
+            height: 0.06,
+            sides: 8,
+            lumps: 3,
+            lobes: 0.25,
+            bristles: 36,
+            bristle_height: 0.9,
+            bristle_splay: 0.35,
+            flatness: 3.5,
+            shoulder: 0.5,
+            sprawl: 0.8,
+            capsules: 3,
+            capsule_height: 1.8,
+            capsule_color: (0.45, 0.22, 0.09),
+        ),
+        color: (0.06, 0.12, 0.035),
+        tip_color: Some((0.2, 0.27, 0.07)),
+        shade: 0.5,
+        color_jitter: 0.15,
+        dry: 0.15,
+        dry_color: (0.42, 0.27, 0.12),
+        detail: 0.7,
+        detail_size: 0.007,
+    )),
+    placement: (
+        spacing: 0.35,
+        probability: 0.7,
+        slope: (0.0, 35.0),
+        noise: Some((frequency: 0.2, threshold: 0.45, octaves: 2)),
+        align: 0.6,
+        scale: (0.7, 1.2),
+        sink: 0.01,
+    ),
+)
